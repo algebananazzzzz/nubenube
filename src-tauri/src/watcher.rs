@@ -12,9 +12,8 @@ pub struct Snapshot {
     pub idle_secs: u64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum AppClass {
-    Work,
     Distraction,
     Neutral,
 }
@@ -22,7 +21,6 @@ pub enum AppClass {
 impl AppClass {
     pub fn as_str(&self) -> &'static str {
         match self {
-            AppClass::Work => "work",
             AppClass::Distraction => "distraction",
             AppClass::Neutral => "neutral",
         }
@@ -40,23 +38,31 @@ pub fn snapshot() -> Snapshot {
     Snapshot { app_name, title, idle_secs }
 }
 
-fn matches(app_lower: &str, list: &[String]) -> bool {
-    list.iter().any(|x| {
-        let x = x.to_lowercase();
-        !x.is_empty() && (app_lower.contains(&x) || x.contains(app_lower))
-    })
+/// Distraction iff the active app's name exactly matches (case-insensitive) a
+/// user-curated entry. Exact identity — never substring — so "X" can't match
+/// "Xcode". Everything else is Neutral (research/editor/etc. never decays).
+pub fn classify(app_name: &str, settings: &Settings) -> AppClass {
+    let a = app_name.trim();
+    if !a.is_empty() && settings.distraction_apps.iter().any(|d| d.trim().eq_ignore_ascii_case(a)) {
+        AppClass::Distraction
+    } else {
+        AppClass::Neutral
+    }
 }
 
-pub fn classify(app_name: &str, settings: &Settings) -> AppClass {
-    if app_name.is_empty() {
-        return AppClass::Neutral;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::Settings;
+
+    #[test]
+    fn exact_match_only_no_substring_false_positive() {
+        let mut s = Settings::default();
+        s.distraction_apps = vec!["X".into(), "Discord".into()];
+        assert!(matches!(classify("Discord", &s), AppClass::Distraction));
+        assert!(matches!(classify("X", &s), AppClass::Distraction));
+        // the old substring bug: "X" must NOT match "Xcode"
+        assert!(matches!(classify("Xcode", &s), AppClass::Neutral));
+        assert!(matches!(classify("", &s), AppClass::Neutral));
     }
-    let a = app_name.to_lowercase();
-    if matches(&a, &settings.distraction_apps) {
-        return AppClass::Distraction;
-    }
-    if matches(&a, &settings.work_apps) {
-        return AppClass::Work;
-    }
-    AppClass::Neutral
 }

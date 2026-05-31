@@ -8,12 +8,24 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Sensitivity {
+    #[serde(default = "def_grace")]
     pub grace_secs: i64,
+    #[serde(default = "def_decay")]
     pub decay_per_min: f64,
-    pub recovery_per_min: f64,
+    /// Health recovered per token Claude consumes (input+output+cache_create).
+    #[serde(default = "def_recovery_per_token")]
+    pub recovery_per_token: f64,
+    #[serde(default = "def_idle")]
     pub idle_threshold_secs: i64,
+    #[serde(default = "def_granularity")]
     pub window_granularity: String,
 }
+
+fn def_grace() -> i64 { 10 }
+fn def_decay() -> f64 { 0.06 }
+fn def_recovery_per_token() -> f64 { 0.000004 }
+fn def_idle() -> i64 { 120 }
+fn def_granularity() -> String { "app".to_string() }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -25,9 +37,7 @@ pub struct WaterRates {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
-    pub work_apps: Vec<String>,
     pub distraction_apps: Vec<String>,
-    pub neutral_apps: Vec<String>,
     pub sensitivity: Sensitivity,
     pub reset_time_local: String,
     pub pause_until: Option<String>,
@@ -43,23 +53,13 @@ fn s(list: &[&str]) -> Vec<String> {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            work_apps: s(&[
-                "Terminal", "iTerm2", "Alacritty", "kitty", "WezTerm", "Ghostty", "Code", "Cursor",
-                "Zed", "IntelliJ IDEA", "PyCharm", "WebStorm", "GoLand", "CLion", "RustRover",
-                "Sublime Text", "nvim", "Vim", "Emacs", "Xcode",
-            ]),
             distraction_apps: s(&[
-                "YouTube", "Netflix", "TikTok", "Instagram", "Reddit", "X", "Twitter", "Steam",
-                "Discord", "Twitch", "Disney+", "Hulu",
-            ]),
-            neutral_apps: s(&[
-                "Safari", "Google Chrome", "Arc", "Firefox", "Slack", "Notion", "Mail", "Figma",
-                "Spotify", "Linear", "Obsidian", "Preview",
+                "TikTok", "Netflix", "Steam", "Discord", "Twitch", "Disney+", "Hulu",
             ]),
             sensitivity: Sensitivity {
-                grace_secs: 90,
+                grace_secs: 10,
                 decay_per_min: 0.06,
-                recovery_per_min: 0.03,
+                recovery_per_token: 0.000004,
                 idle_threshold_secs: 120,
                 window_granularity: "app".to_string(),
             },

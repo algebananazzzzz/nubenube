@@ -79,6 +79,17 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             last_reset_day TEXT NOT NULL DEFAULT '',
             mood           TEXT NOT NULL DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS known_apps (
+            app_name   TEXT PRIMARY KEY,
+            first_seen TEXT NOT NULL DEFAULT '',
+            last_seen  TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS drift_by_app (
+            local_day TEXT NOT NULL,
+            app_name  TEXT NOT NULL,
+            secs      INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (local_day, app_name)
+        );
         "#,
     )
 }
@@ -115,6 +126,46 @@ pub fn project_token_total(conn: &Connection, pid: &str) -> i64 {
         |r| r.get(0),
     )
     .unwrap_or(0)
+}
+
+/// Record a foreground app the watcher observed (auto-discovery backbone).
+pub fn record_known_app(conn: &Connection, app_name: &str) {
+    if app_name.is_empty() {
+        return;
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = conn.execute(
+        "INSERT INTO known_apps(app_name,first_seen,last_seen) VALUES(?1,?2,?2)
+         ON CONFLICT(app_name) DO UPDATE SET last_seen=?2",
+        params![app_name, now],
+    );
+}
+
+/// All discovered apps, most-recently-seen first.
+pub fn get_known_apps(conn: &Connection) -> Vec<KnownApp> {
+    let mut out = Vec::new();
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT app_name, last_seen FROM known_apps ORDER BY last_seen DESC")
+    {
+        let rows = stmt
+            .query_map([], |r| Ok(KnownApp { name: r.get(0)?, last_seen: r.get(1)? }))
+            .into_iter()
+            .flatten()
+            .flatten();
+        out.extend(rows);
+    }
+    out
+}
+
+pub fn add_drift_by_app(conn: &Connection, day: &str, app_name: &str, secs: i64) {
+    if app_name.is_empty() || secs <= 0 {
+        return;
+    }
+    let _ = conn.execute(
+        "INSERT INTO drift_by_app(local_day,app_name,secs) VALUES(?1,?2,?3)
+         ON CONFLICT(local_day,app_name) DO UPDATE SET secs = secs + ?3",
+        params![day, app_name, secs],
+    );
 }
 
 // ----------------------------------------------------------------------------

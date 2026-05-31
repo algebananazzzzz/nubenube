@@ -52,6 +52,7 @@ pub struct DriftRuntime {
     last_tick: Instant,
     sessions: HashMap<String, Session>, // session_id → lifecycle state (all live sessions, any phase)
     last_token_total: i64,
+    last_app_name: String,
 }
 
 /// Summarize waiting sessions given each one's (project_id, elapsed_secs):
@@ -88,6 +89,28 @@ pub fn seconds_to_death(health: f64, waiting_count: i64, decay_per_min: f64) -> 
     }
 }
 
+/// The whole-life model in one place (pure → unit-testable).
+/// Decay applies only while drifting (distraction + ≥1 waiting session);
+/// recovery is token-driven and ~10× gentler; otherwise health holds.
+pub fn apply_focus(
+    health: f64,
+    dt: f64,
+    drifting: bool,
+    waiting_count: i64,
+    new_tokens: i64,
+    decay_per_min: f64,
+    recovery_per_token: f64,
+) -> f64 {
+    let mut h = health;
+    if drifting && waiting_count > 0 {
+        h -= decay_per_min * waiting_count as f64 * (dt / 60.0);
+    }
+    if new_tokens > 0 {
+        h += recovery_per_token * new_tokens as f64;
+    }
+    h.clamp(0.0, 1.0)
+}
+
 impl DriftRuntime {
     pub fn new(db_path: PathBuf, config_dir: PathBuf) -> Self {
         let mut rt = DriftRuntime {
@@ -101,6 +124,7 @@ impl DriftRuntime {
             last_tick: Instant::now(),
             sessions: HashMap::new(),
             last_token_total: 0,
+            last_app_name: String::new(),
         };
         if let Ok(conn) = db::open(&rt.db_path) {
             if let Some(pid) = db::most_recent_project(&conn) {
@@ -190,6 +214,13 @@ impl DriftRuntime {
         let s = settings::load(&self.config_dir);
         let snap = watcher::snapshot();
         let class = watcher::classify(&snap.app_name, &s);
+
+        if !snap.app_name.is_empty() && snap.app_name != self.last_app_name {
+            self.last_app_name = snap.app_name.clone();
+            if let Ok(c) = db::open(&self.db_path) {
+                db::record_known_app(&c, &snap.app_name);
+            }
+        }
         let today = Local::now().format("%Y-%m-%d").to_string();
 
         if self.project_id.is_none() {
@@ -242,36 +273,48 @@ impl DriftRuntime {
                 }
             }
         } else {
-            match class {
-                AppClass::Work => {
-                    self.state = "growing".to_string();
-                    self.health += s.sensitivity.recovery_per_min * dt / 60.0;
-                    if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
-                        db::add_drift(c, &pid, &today, dts, 0, 0);
-                    }
-                }
-                AppClass::Distraction if waiting_count > 0 => {
-                    self.state = "drifting".to_string();
-                    if let Some(c) = &conn {
-                        for (key, k) in &per_project {
-                            let drift = dts * *k;
-                            let decay = s.sensitivity.decay_per_min * (dt / 60.0) * (*k as f64);
-                            let pid = if key == "_" {
-                                self.project_id.clone()
-                            } else {
-                                Some(key.clone())
-                            };
-                            if let Some(pid) = pid {
-                                db::add_drift(c, &pid, &today, 0, drift, 0);
-                                self.decay_project(c, &pid, &today, decay);
-                            }
+            // token-driven recovery (works whenever Claude is consuming for you)
+            let mut new_tokens = 0i64;
+            if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
+                let cur = db::project_token_total(c, &pid);
+                new_tokens = (cur - self.last_token_total).max(0);
+                self.last_token_total = cur;
+            }
+            let drifting = matches!(class, AppClass::Distraction) && waiting_count > 0;
+
+            self.health = apply_focus(
+                self.health,
+                dt,
+                drifting,
+                waiting_count,
+                new_tokens,
+                s.sensitivity.decay_per_min,
+                s.sensitivity.recovery_per_token,
+            );
+
+            if drifting {
+                self.state = "drifting".to_string();
+                if let Some(c) = &conn {
+                    for (key, kx) in &per_project {
+                        let drift = dts * *kx;
+                        let pid = if key == "_" { self.project_id.clone() } else { Some(key.clone()) };
+                        if let Some(pid) = pid {
+                            db::add_drift(c, &pid, &today, 0, drift, 0);
                         }
                     }
+                    // per-app distraction time (Phase 5 reads this) — guarded so it
+                    // is a no-op until the table exists.
+                    db::add_drift_by_app(c, &today, &snap.app_name, dts);
                 }
-                _ => {
-                    // distraction while Claude is still busy, or a neutral app -> hold
-                    self.state = "growing".to_string();
+            } else if waiting_count > 0 {
+                self.state = "waiting".to_string(); // session waiting, you're attending
+            } else if new_tokens > 0 {
+                self.state = "growing".to_string(); // Claude actively working for you
+                if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
+                    db::add_drift(c, &pid, &today, dts, 0, 0); // honest "active" secs
                 }
+            } else {
+                self.state = "idle".to_string(); // nothing happening — hold
             }
         }
 
@@ -392,5 +435,21 @@ mod tests {
         assert_eq!(seconds_to_death(1.0, 1, 0.06), Some(1000));
         assert_eq!(seconds_to_death(1.0, 4, 0.06), Some(250));
         assert_eq!(seconds_to_death(1.0, 0, 0.06), None);
+    }
+
+    #[test]
+    fn holds_when_no_distraction_and_no_tokens() {
+        // session waiting, but on a neutral app, no tokens → unchanged
+        assert_eq!(apply_focus(0.5, 2.0, false, 1, 0, 0.06, 4e-6), 0.5);
+    }
+    #[test]
+    fn decays_only_when_drifting() {
+        let h = apply_focus(0.5, 60.0, true, 2, 0, 0.06, 4e-6); // 1 min, 2 waiting
+        assert!((h - (0.5 - 0.12)).abs() < 1e-9);
+    }
+    #[test]
+    fn recovers_from_tokens() {
+        let h = apply_focus(0.5, 2.0, false, 0, 50_000, 0.06, 4e-6); // 50k tokens → +0.2
+        assert!((h - 0.7).abs() < 1e-9);
     }
 }
