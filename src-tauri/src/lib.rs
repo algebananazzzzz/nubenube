@@ -75,6 +75,10 @@ pub fn run() {
             // Connector: initial scan + fs watcher.
             connector::start(app.handle().clone(), db_path.clone());
 
+            // Self-heal Claude Code hooks if the user previously installed them
+            // (fixes the empty-array regression that silenced events).
+            let _ = hooks_installer::ensure_installed();
+
             // Drift: watcher loop + Claude-Code event tail.
             let runtime = Arc::new(Mutex::new(DriftRuntime::new(db_path, config_dir)));
             drift::start_watcher(app.handle().clone(), runtime.clone());
