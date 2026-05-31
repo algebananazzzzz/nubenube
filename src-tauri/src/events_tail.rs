@@ -69,8 +69,10 @@ pub fn start(_app: AppHandle, runtime: Arc<Mutex<DriftRuntime>>) {
                     let sid = ev.session_id.unwrap_or_default();
                     if let Ok(mut rt) = runtime.lock() {
                         match ev.event.as_deref() {
-                            Some("stop") => rt.handle_stop(&sid, &cwd),
+                            Some("start") => rt.handle_start(&sid, &cwd),
                             Some("reengage") => rt.handle_reengage(&sid, &cwd),
+                            Some("stop") => rt.handle_stop(&sid, &cwd),
+                            Some("end") => rt.handle_end(&sid),
                             _ => {}
                         }
                     }

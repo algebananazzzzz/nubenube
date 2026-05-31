@@ -106,6 +106,17 @@ fn bump_meta(conn: &Connection, key: &str, delta: u64) {
     set_meta(conn, key, &(cur + delta).to_string());
 }
 
+/// Sum of "meaningful" tokens (input+output+cache_create; excludes cache_read
+/// context replay) for a project. Drives token-based health recovery.
+pub fn project_token_total(conn: &Connection, pid: &str) -> i64 {
+    conn.query_row(
+        "SELECT COALESCE(SUM(input+output+cache_create),0) FROM messages_seen WHERE project_id=?1",
+        [pid],
+        |r| r.get(0),
+    )
+    .unwrap_or(0)
+}
+
 // ----------------------------------------------------------------------------
 //  Ingest (incremental tail)
 // ----------------------------------------------------------------------------

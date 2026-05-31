@@ -128,4 +128,6 @@ pub struct FocusTickDto {
     pub cloud_health: f64,
     pub seconds_since_claude_finished: Option<i64>,
     pub waiting_sessions: i64,
+    pub running_sessions: i64,
+    pub seconds_to_death: Option<i64>,
 }
