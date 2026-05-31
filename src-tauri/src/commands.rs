@@ -205,3 +205,43 @@ pub fn nube_set_paused(state: State<AppState>, paused: bool) {
     };
     crate::settings::save(&state.config_dir, &s);
 }
+
+#[tauri::command]
+pub fn get_known_apps(state: State<AppState>) -> Vec<KnownApp> {
+    db::open(&state.db_path).map(|c| db::get_known_apps(&c)).unwrap_or_default()
+}
+
+/// Best-effort list of currently-running GUI apps (to pre-populate the picker).
+/// Auto-discovery (known_apps) is the primary source; this is a bonus.
+#[tauri::command]
+pub fn list_running_apps() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("osascript")
+            .args(["-e", "tell application \"System Events\" to get name of (every process whose background only is false)"])
+            .output();
+        if let Ok(o) = out {
+            let s = String::from_utf8_lossy(&o.stdout);
+            let mut v: Vec<String> = s.split(", ").map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+            v.sort();
+            v.dedup();
+            return v;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(o) = std::process::Command::new("wmctrl").arg("-lx").output() {
+            let s = String::from_utf8_lossy(&o.stdout);
+            let mut v: Vec<String> = s
+                .lines()
+                .filter_map(|l| l.split_whitespace().nth(2)) // WM_CLASS col
+                .filter_map(|c| c.split('.').last())
+                .map(|x| x.to_string())
+                .collect();
+            v.sort();
+            v.dedup();
+            return v;
+        }
+    }
+    Vec::new()
+}

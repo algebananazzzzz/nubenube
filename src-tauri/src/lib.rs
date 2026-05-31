@@ -152,6 +152,8 @@ pub fn run() {
             commands::nube_show_takeover,
             commands::nube_hide_takeover,
             commands::nube_set_paused,
+            commands::get_known_apps,
+            commands::list_running_apps,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Nube Nube")

@@ -115,6 +115,13 @@ pub struct ProjectDetail {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct KnownApp {
+    pub name: String,
+    pub last_seen: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct FocusTickDto {
     pub ts: String,
     pub app_id: String,
