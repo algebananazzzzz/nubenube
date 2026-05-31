@@ -12,7 +12,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 const HOOK_SCRIPT: &str = r#"#!/usr/bin/env bash
-# Nube Nube hook bridge. $1 = event name (stop | reengage).
+# Nube Nube hook bridge. $1 = event name (start | reengage | stop | end).
 # Reads the Claude Code hook JSON from stdin and appends a compact event line.
 set -euo pipefail
 dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/nube"
@@ -114,8 +114,10 @@ pub fn install_at(dir: &Path) -> Result<()> {
     }
 
     let base = format!("bash '{}'", script.display());
-    add_hook_entry(&mut root, "Stop", &format!("{base} stop"));
+    add_hook_entry(&mut root, "SessionStart", &format!("{base} start"));
     add_hook_entry(&mut root, "UserPromptSubmit", &format!("{base} reengage"));
+    add_hook_entry(&mut root, "Stop", &format!("{base} stop"));
+    add_hook_entry(&mut root, "SessionEnd", &format!("{base} end"));
 
     std::fs::write(&settings_path, serde_json::to_string_pretty(&root)?)?;
     Ok(())
@@ -128,7 +130,7 @@ pub fn uninstall_at(dir: &Path) -> Result<()> {
     }
     let txt = std::fs::read_to_string(&settings_path)?;
     let mut root: Value = serde_json::from_str(&txt).unwrap_or_else(|_| json!({}));
-    for ev in ["Stop", "UserPromptSubmit"] {
+    for ev in ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"] {
         if let Some(arr) = root
             .get_mut("hooks")
             .and_then(|h| h.get_mut(ev))
@@ -150,7 +152,7 @@ pub fn is_installed_at(dir: &Path) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    ["Stop", "UserPromptSubmit"].iter().any(|ev| {
+    ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"].iter().any(|ev| {
         root.get("hooks")
             .and_then(|h| h.get(*ev))
             .and_then(|a| a.as_array())
@@ -167,6 +169,18 @@ pub fn uninstall() -> Result<()> {
 }
 pub fn is_installed() -> bool {
     is_installed_at(&claude_dir())
+}
+
+/// Re-add any missing nube hook entries IF the user previously installed
+/// (the script file exists). Fixes the empty-array regression on launch.
+pub fn ensure_installed_at(dir: &Path) -> Result<()> {
+    if script_path_in(dir).exists() {
+        install_at(dir)?; // add_hook_entry is idempotent — only fills gaps
+    }
+    Ok(())
+}
+pub fn ensure_installed() -> Result<()> {
+    ensure_installed_at(&claude_dir())
 }
 
 #[cfg(test)]
@@ -203,6 +217,8 @@ mod tests {
         let stop = after["hooks"]["Stop"].as_array().unwrap();
         assert!(stop.iter().any(entry_is_nube));
         assert!(after["hooks"]["UserPromptSubmit"].as_array().unwrap().iter().any(entry_is_nube));
+        assert!(after["hooks"]["SessionStart"].as_array().unwrap().iter().any(entry_is_nube));
+        assert!(after["hooks"]["SessionEnd"].as_array().unwrap().iter().any(entry_is_nube));
         // backup
         assert!(dir.join("settings.json.nube-backup").exists());
         assert!(script_path_in(&dir).exists());
@@ -220,6 +236,28 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
         assert!(after3["hooks"]["Notification"].as_array().unwrap().len() >= 1);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ensure_installed_repairs_empty_arrays() {
+        let dir = std::env::temp_dir().join(format!("nube_heal_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // First install (creates script + entries), then simulate the regression:
+        install_at(&dir).unwrap();
+        let regressed = json!({ "hooks": { "Stop": [], "UserPromptSubmit": [], "SessionStart": [], "SessionEnd": [] } });
+        std::fs::write(dir.join("settings.json"), serde_json::to_string_pretty(&regressed).unwrap()).unwrap();
+        assert!(!is_installed_at(&dir));
+
+        // Script still exists -> ensure_installed re-adds all four.
+        ensure_installed_at(&dir).unwrap();
+        assert!(is_installed_at(&dir));
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        for ev in ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"] {
+            assert!(after["hooks"][ev].as_array().unwrap().iter().any(entry_is_nube), "{ev} not repaired");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
