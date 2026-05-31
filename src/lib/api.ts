@@ -9,6 +9,7 @@ import type {
   DayPoint,
   FocusTick,
   Insights,
+  KnownApp,
   Project,
   RangeKey,
   Settings,
@@ -62,6 +63,8 @@ export const api = {
       byDay: mockProjectByDay(id),
     })),
   resetToday: () => call<void>('reset_today', {}, () => undefined),
+  getKnownApps: () => call<KnownApp[]>('get_known_apps', {}, () => []),
+  listRunningApps: () => call<string[]>('list_running_apps', {}, () => []),
   exportData: () => call<string>('export_data', {}, () => JSON.stringify({ projects: mockProjects }, null, 2)),
 }
 

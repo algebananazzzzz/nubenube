@@ -82,19 +82,15 @@ export function phaseFromTick(t: FocusTick): Phase {
   const h = t.cloudHealth ?? BASE_LIFE / 100
   if (h <= 0.02) return 'faint'
   const ss = t.secondsSinceClaudeFinished ?? null
-  const distracted = t.appClass === 'distraction'
   switch (t.state) {
     case 'drifting':
-      // on a distraction app after grace — escalate by how long Claude has waited
       if (ss != null && ss >= 300) return 'fading'
       if (ss != null && ss >= 120) return 'critical'
       return 'draining'
-    case 'grace':
-      // Claude just finished; only nudge if you're already in a distraction app
-      return distracted ? 'waiting' : 'working'
+    case 'waiting':
+      return 'waiting'
     case 'paused':
     case 'idle':
-      // an explicit break or away-from-keyboard is always resting — never a takeover
       return 'idle'
     case 'growing':
       return 'working'

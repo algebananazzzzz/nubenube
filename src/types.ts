@@ -8,13 +8,13 @@ export type TokenBreakdown = {
   cacheRead: number
 }
 
-export type AppClass = 'work' | 'distraction' | 'neutral'
+export type AppClass = 'distraction' | 'neutral'
 
 export type FocusState =
-  | 'growing' // focused on work / Claude
-  | 'grace' // Claude just finished; brief no-fade window
-  | 'drifting' // on a distraction app after grace
-  | 'idle' // away from keyboard — health frozen
+  | 'growing' // Claude actively working for you (tokens flowing)
+  | 'waiting' // a session finished; you're attending (not distracted)
+  | 'drifting' // on a distraction app while a session waits
+  | 'idle' // away / nothing happening — health frozen
   | 'paused' // user enabled break/pause mode
   | 'unknown'
 
@@ -73,6 +73,7 @@ export type Insights = {
   claudeActiveSecs: number
   driftSecs: number
   longestFocusStreakSecs: number
+  distractionBreakdown: { name: string; secs: number }[]
 }
 
 export type FocusTick = {
@@ -88,12 +89,14 @@ export type FocusTick = {
   cloudHealth: number
   secondsSinceClaudeFinished?: number
   waitingSessions: number // # of Claude sessions stopped-and-waiting (past grace)
+  runningSessions: number // # sessions currently running (Claude working)
+  secondsToDeath?: number // health/decay countdown; absent when meter holds
 }
 
 export type Sensitivity = {
   graceSecs: number
   decayPerMin: number // health lost per minute of sustained distraction (0..1)
-  recoveryPerMin: number // health regained per minute of focus (0..1)
+  recoveryPerToken: number // health regained per token consumed (0..1)
   idleThresholdSecs: number
   windowGranularity: 'app' | 'title'
 }
@@ -101,9 +104,7 @@ export type Sensitivity = {
 export type DriftMomentIntensity = 'passive' | 'gentle-notification' | 'overlay'
 
 export type Settings = {
-  workApps: string[]
   distractionApps: string[]
-  neutralApps: string[]
   sensitivity: Sensitivity
   resetTimeLocal: string // "HH:MM"
   pauseUntil: string | null
@@ -111,6 +112,8 @@ export type Settings = {
   waterRates: { read: number; write: number } // mL per token
   logRoots: string[]
 }
+
+export type KnownApp = { name: string; lastSeen: string }
 
 export type ConnectionStatus = {
   connected: boolean

@@ -3,6 +3,7 @@
 // Claude Code connection) + UI-only prefs (rescue levels, reminder, sound).
 
 import { useEffect, useState } from 'react'
+import type { KnownApp } from '../types'
 import { useSettings } from '../store/settings'
 import { useUsage } from '../store/usage'
 import { usePrefs } from '../store/prefs'
@@ -43,6 +44,14 @@ export function Settings() {
   const prefs = usePrefs()
   const [adding, setAdding] = useState('')
   const [busy, setBusy] = useState(false)
+  const [known, setKnown] = useState<KnownApp[]>([])
+  const [running, setRunning] = useState<string[]>([])
+  const refreshApps = async () => {
+    const [k, r] = await Promise.all([api.getKnownApps(), api.listRunningApps()])
+    setKnown(k.data)
+    setRunning(r.data)
+  }
+  useEffect(() => { void refreshApps() }, [])
 
   useEffect(() => { void load() }, [load])
 
@@ -51,23 +60,23 @@ export function Settings() {
   }
 
   const distraction = settings.distractionApps
-  const neutral = settings.neutralApps
-  const apps = [
-    ...distraction.map((n) => ({ name: n, on: true })),
-    ...neutral.map((n) => ({ name: n, on: false })),
-  ].sort((a, b) => a.name.localeCompare(b.name))
+  const distractSet = new Set(distraction.map((d) => d.toLowerCase()))
+  const names = Array.from(
+    new Set<string>([...distraction, ...known.map((k) => k.name), ...running])
+  ).sort((a, b) => a.localeCompare(b))
+  const apps = names.map((name) => ({ name, on: distractSet.has(name.toLowerCase()) }))
 
   const toggleApp = (name: string, on: boolean) => {
     if (on) {
-      save({ distractionApps: distraction.filter((n) => n !== name), neutralApps: [...neutral, name] })
+      save({ distractionApps: distraction.filter((n) => n.toLowerCase() !== name.toLowerCase()) })
     } else {
-      save({ neutralApps: neutral.filter((n) => n !== name), distractionApps: [...distraction, name] })
+      save({ distractionApps: [...distraction, name] })
     }
   }
   const addApp = () => {
     const n = adding.trim()
-    if (!n || distraction.includes(n)) return setAdding('')
-    save({ distractionApps: [...distraction, n], neutralApps: neutral.filter((x) => x !== n) })
+    if (!n || distractSet.has(n.toLowerCase())) return setAdding('')
+    save({ distractionApps: [...distraction, n] })
     setAdding('')
   }
 
@@ -110,9 +119,12 @@ export function Settings() {
           <Card pad={18}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
               {sectionTitle('what counts as distraction')}
-              <Pill hue={ACCENT} tone="soft" style={{ fontSize: 11 }}>{distraction.length} drain</Pill>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Pill hue={ACCENT} tone="soft" style={{ fontSize: 11 }}>{distraction.length} drain</Pill>
+                <Btn hue={268} kind="soft" size="sm" onClick={() => void refreshApps()}>↻ scan apps</Btn>
+              </div>
             </div>
-            <div style={{ fontWeight: 600, fontSize: 12, color: SUB, marginBottom: 4 }}>when Claude is done and you open one of these, Nube starts losing water.</div>
+            <div style={{ fontWeight: 600, fontSize: 12, color: SUB, marginBottom: 4 }}>tag the apps that pull you away. while Claude waits, only these drain Nube — research &amp; editors never do.</div>
             <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 320, overflowY: 'auto' }}>
               {apps.map((a, i) => (
                 <div key={a.name} style={{ borderTop: i === 0 ? 'none' : '1px solid rgba(120,100,170,.1)' }}>

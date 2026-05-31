@@ -199,6 +199,11 @@ export function mockInsights(range: RangeKey): Insights {
     claudeActiveSecs,
     driftSecs,
     longestFocusStreakSecs: 2 * 3600 + 14 * 60,
+    distractionBreakdown: [
+      { name: 'YouTube', secs: 720 },
+      { name: 'Reddit', secs: 360 },
+      { name: 'TikTok', secs: 180 },
+    ],
   }
 }
 
@@ -207,13 +212,11 @@ export function mockProjectByDay(id: string): DayPoint[] {
 }
 
 export const mockSettings: Settings = {
-  workApps: ['Terminal', 'iTerm2', 'Alacritty', 'kitty', 'WezTerm', 'Ghostty', 'Code', 'Cursor', 'Zed', 'IntelliJ IDEA', 'PyCharm', 'WebStorm', 'Sublime Text', 'nvim'],
-  distractionApps: ['YouTube', 'Netflix', 'TikTok', 'Instagram', 'Reddit', 'X', 'Twitter', 'Steam', 'Discord'],
-  neutralApps: ['Safari', 'Google Chrome', 'Arc', 'Firefox', 'Slack', 'Notion', 'Mail', 'Figma', 'Spotify'],
+  distractionApps: ['TikTok', 'Netflix', 'Steam', 'Discord', 'Twitch'],
   sensitivity: {
-    graceSecs: 90,
+    graceSecs: 10,
     decayPerMin: 0.06,
-    recoveryPerMin: 0.03,
+    recoveryPerToken: 0.000004,
     idleThresholdSecs: 120,
     windowGranularity: 'app',
   },
@@ -239,7 +242,7 @@ export const mockFocusTick: FocusTick = {
   ts: new Date().toISOString(),
   appId: 'com.microsoft.VSCode',
   appName: 'Code',
-  appClass: 'work',
+  appClass: 'neutral',
   title: 'lib.rs — nubenube',
   idleSecs: 4,
   state: 'growing',
@@ -248,4 +251,6 @@ export const mockFocusTick: FocusTick = {
   cloudHealth: 0.82,
   secondsSinceClaudeFinished: 42,
   waitingSessions: 0,
+  runningSessions: 1,
+  secondsToDeath: undefined,
 }
