@@ -92,6 +92,8 @@ pub fn seconds_to_death(health: f64, waiting_count: i64, decay_per_min: f64) -> 
 /// The whole-life model in one place (pure → unit-testable).
 /// Decay applies only while drifting (distraction + ≥1 waiting session);
 /// recovery is token-driven and ~10× gentler; otherwise health holds.
+/// Pure health update. Precondition: `drifting` implies `waiting_count > 0`
+/// (decay is proportional to waiting_count, so a 0 count is a no-op anyway).
 pub fn apply_focus(
     health: f64,
     dt: f64,
@@ -102,7 +104,7 @@ pub fn apply_focus(
     recovery_per_token: f64,
 ) -> f64 {
     let mut h = health;
-    if drifting && waiting_count > 0 {
+    if drifting {
         h -= decay_per_min * waiting_count as f64 * (dt / 60.0);
     }
     if new_tokens > 0 {
@@ -194,18 +196,6 @@ impl DriftRuntime {
         self.sessions.remove(&Self::session_key(session_id));
     }
 
-    /// Apply scaled decay to one project's health (active project tracked in
-    /// `self.health`; others read/written straight to the DB).
-    fn decay_project(&mut self, conn: &Connection, pid: &str, today: &str, decay: f64) {
-        if self.project_id.as_deref() == Some(pid) {
-            self.health = (self.health - decay).clamp(0.0, 1.0);
-        } else {
-            let (h, day) = db::load_health(conn, pid);
-            let base = if day != today { RESET_BASELINE } else { h };
-            db::save_health(conn, pid, (base - decay).clamp(0.0, 1.0), today);
-        }
-    }
-
     pub fn tick(&mut self, app: &AppHandle) {
         let now = Instant::now();
         let dt = (now - self.last_tick).as_secs_f64();
@@ -267,6 +257,11 @@ impl DriftRuntime {
                 }
             }
             self.state = (if paused { "paused" } else { "idle" }).to_string();
+            // advance the token cursor during idle/paused so returning doesn't dump a
+            // huge recovery delta (idle freezes health — those tokens don't recover it)
+            if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
+                self.last_token_total = db::project_token_total(c, &pid);
+            }
             if idle && !paused {
                 if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
                     db::add_drift(c, &pid, &today, 0, 0, dts);
