@@ -1,0 +1,73 @@
+/* NubeNube design tokens — single light candy-pastel theme.
+   Display/brand + hero numbers: Baloo 2.  UI/body/data: Plus Jakarta Sans.
+   Ported from the Claude Design prototype (ui.jsx / nube.jsx / biome.jsx). */
+
+:root {
+  /* ── ink + surfaces ── */
+  --ink: #33304c;
+  --sub: #6f6a8c;
+  --faint: #a39ec0;
+  --canvas: #efeaf7;
+  --surface: #ffffff;
+  --surface-2: #fbf9fe;
+  --line: rgba(70, 52, 130, 0.08);
+  --line-strong: rgba(70, 52, 130, 0.14);
+
+  /* hero accent (lilac) — most per-element colour is computed via hueClay() */
+  --accent-hue: 268;
+
+  /* drift / danger */
+  --warn: #e0a23a;
+  --danger: #d2683f;
+  --danger-2: #ea7458;
+
+  /* ── type ── */
+  --font-disp: 'Baloo 2', system-ui, -apple-system, sans-serif;
+  --font-ui: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+
+  /* ── elevation ── */
+  --shadow-sm: 0 1px 2px rgba(48, 42, 82, 0.06);
+  --shadow-md: 0 1px 2px rgba(48, 42, 82, 0.05), 0 10px 26px -20px rgba(70, 52, 130, 0.5);
+  --shadow-lg: 0 2px 4px rgba(48, 42, 82, 0.06), 0 26px 56px -30px rgba(70, 52, 130, 0.6);
+  --border: 1px solid rgba(70, 52, 130, 0.07);
+
+  /* ── radii ── */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-pill: 999px;
+
+  /* ── motion ── */
+  --ease: cubic-bezier(0.4, 1.2, 0.5, 1);
+}
+
+/* ── creature / biome / ui keyframes (consolidated from the prototype) ── */
+@keyframes nbFloat { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-9px) } }
+@keyframes nbFloatSoft { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
+@keyframes nbSquish { 0%,100% { transform: scaleY(1) scaleX(1) } 50% { transform: scaleY(.95) scaleX(1.04) } }
+@keyframes nbGasp { 0%,100% { transform: scaleY(1) scaleX(1) } 50% { transform: scaleY(1.06) scaleX(.95) } }
+@keyframes nbTailWag { 0%,100% { transform: rotate(-8deg) } 50% { transform: rotate(8deg) } }
+@keyframes nbCurlSway { 0%,100% { transform: rotate(-5deg) } 50% { transform: rotate(6deg) } }
+@keyframes nbCurlFlop { 0%,100% { transform: rotate(-2deg) } 50% { transform: rotate(3deg) } }
+@keyframes nbBlink { 0%,93%,100% { transform: scaleY(1) } 96% { transform: scaleY(.08) } }
+@keyframes nbTwinkle { 0%,100% { opacity: .2; transform: scale(.6) } 50% { opacity: 1; transform: scale(1) } }
+@keyframes nbTear { 0% { transform: translateY(0); opacity: 0 } 25% { opacity: .95 } 100% { transform: translateY(16px); opacity: 0 } }
+@keyframes nbSweat { 0% { transform: translateY(-2px); opacity: 0 } 25% { opacity: .95 } 100% { transform: translateY(15px); opacity: 0 } }
+@keyframes nbHeart { 0%,100% { transform: scale(1); opacity: .5 } 50% { transform: scale(1.18); opacity: .85 } }
+@keyframes nbDangerGlow { 0%,100% { opacity: .4 } 50% { opacity: .85 } }
+
+@keyframes drift1 { 0% { transform: translateX(-8px) } 50% { transform: translateX(12px) } 100% { transform: translateX(-8px) } }
+@keyframes drift2 { 0% { transform: translateX(8px) } 50% { transform: translateX(-10px) } 100% { transform: translateX(8px) } }
+@keyframes sunPulse { 0%,100% { transform: scale(1); opacity: .92 } 50% { transform: scale(1.05); opacity: 1 } }
+@keyframes sunSpin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
+@keyframes twk { 0%,100% { opacity: .12; transform: scale(.5) } 50% { opacity: 1; transform: scale(1) } }
+@keyframes zzzFloat { 0% { opacity: 0; transform: translateY(0) scale(.6) } 30% { opacity: .9 } 100% { opacity: 0; transform: translateY(-26px) scale(1.1) } }
+@keyframes rainFall { 0% { transform: translateY(-12px); opacity: 0 } 20% { opacity: .7 } 100% { transform: translateY(120px); opacity: 0 } }
+
+@keyframes nnFadeUp { 0% { transform: translateY(10px); opacity: 0 } 100% { transform: translateY(0); opacity: 1 } }
+@keyframes nnPop { 0% { transform: scale(.94) } 60% { transform: scale(1.02) } 100% { transform: scale(1) } }
+@keyframes nnSpin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; }
+}
