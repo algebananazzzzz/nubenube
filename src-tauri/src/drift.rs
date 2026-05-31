@@ -50,7 +50,7 @@ pub struct DriftRuntime {
     health: f64,
     last_reset_day: String,
     last_tick: Instant,
-    waiting: HashMap<String, Session>,
+    sessions: HashMap<String, Session>, // session_id → lifecycle state (all live sessions, any phase)
     last_token_total: i64,
 }
 
@@ -99,7 +99,7 @@ impl DriftRuntime {
             health: RESET_BASELINE,
             last_reset_day: String::new(),
             last_tick: Instant::now(),
-            waiting: HashMap::new(),
+            sessions: HashMap::new(),
             last_token_total: 0,
         };
         if let Ok(conn) = db::open(&rt.db_path) {
@@ -139,7 +139,7 @@ impl DriftRuntime {
             }
         }
         let key = Self::session_key(session_id);
-        let entry = self.waiting.entry(key).or_insert(Session {
+        let entry = self.sessions.entry(key).or_insert(Session {
             project_id: project_id.clone(),
             phase,
             since: Instant::now(),
@@ -167,7 +167,7 @@ impl DriftRuntime {
     }
     /// SessionEnd hook: session removed.
     pub fn handle_end(&mut self, session_id: &str) {
-        self.waiting.remove(&Self::session_key(session_id));
+        self.sessions.remove(&Self::session_key(session_id));
     }
 
     /// Apply scaled decay to one project's health (active project tracked in
@@ -205,20 +205,19 @@ impl DriftRuntime {
             self.last_reset_day = today.clone();
         }
 
-        // drop only abandoned WAITING sessions; keep running/idle
-        self.waiting.retain(|_, s| {
-            !(s.phase == SessionPhase::Waiting && (now - s.since).as_secs() > ABANDON_SECS)
-        });
+        // evict any session that has sat in its current phase past the abandon
+        // timeout (covers Waiting drift AND Running/Idle whose SessionEnd was missed)
+        self.sessions.retain(|_, s| (now - s.since).as_secs() <= ABANDON_SECS);
         let grace = s.sensitivity.grace_secs.max(0) as u64;
         let waiting_list: Vec<(Option<String>, u64)> = self
-            .waiting
+            .sessions
             .values()
             .filter(|s| s.phase == SessionPhase::Waiting)
             .map(|s| (s.project_id.clone(), (now - s.since).as_secs()))
             .collect();
         let (waiting_count, per_project, longest) = waiting_load(&waiting_list, grace);
         let running_count = self
-            .waiting
+            .sessions
             .values()
             .filter(|s| s.phase == SessionPhase::Running)
             .count() as i64;
@@ -231,9 +230,9 @@ impl DriftRuntime {
         if paused || idle {
             // freeze every waiting clock so a break/away doesn't age the wait
             let frozen = Duration::from_secs_f64(dt);
-            for s in self.waiting.values_mut() {
-                if s.phase == SessionPhase::Waiting {
-                    s.since += frozen;
+            for session in self.sessions.values_mut() {
+                if session.phase == SessionPhase::Waiting {
+                    session.since += frozen;
                 }
             }
             self.state = (if paused { "paused" } else { "idle" }).to_string();
@@ -285,7 +284,7 @@ impl DriftRuntime {
         let seconds_to_death = seconds_to_death(self.health, waiting_count, s.sensitivity.decay_per_min);
         if self.state == "drifting" {
             let mut fire = false;
-            for w in self.waiting.values_mut().filter(|s| s.phase == SessionPhase::Waiting) {
+            for w in self.sessions.values_mut().filter(|s| s.phase == SessionPhase::Waiting) {
                 let elapsed = (now - w.since).as_secs();
                 if elapsed <= ABANDON_SECS && !w.notified && elapsed >= grace + 60 {
                     w.notified = true;

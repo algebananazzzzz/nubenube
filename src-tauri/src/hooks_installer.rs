@@ -1,7 +1,8 @@
 //! Non-destructive Claude Code hook installer.
 //!
-//! Appends a Stop + UserPromptSubmit hook to ~/.claude/settings.json (user
-//! scope = all projects) that writes a small event line to
+//! Appends SessionStart/UserPromptSubmit/Stop/SessionEnd hooks to
+//! ~/.claude/settings.json (user scope = all projects) that write a small
+//! event line to
 //! ~/.claude/hooks/nube/events.jsonl. We deep-merge into the existing JSON,
 //! preserving the user's other hooks (e.g. Notification) and statusLine, and
 //! back the file up once before the first edit.
@@ -152,7 +153,7 @@ pub fn is_installed_at(dir: &Path) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"].iter().any(|ev| {
+    ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"].iter().all(|ev| {
         root.get("hooks")
             .and_then(|h| h.get(*ev))
             .and_then(|a| a.as_array())
@@ -174,7 +175,7 @@ pub fn is_installed() -> bool {
 /// Re-add any missing nube hook entries IF the user previously installed
 /// (the script file exists). Fixes the empty-array regression on launch.
 pub fn ensure_installed_at(dir: &Path) -> Result<()> {
-    if script_path_in(dir).exists() {
+    if script_path_in(dir).exists() && !is_installed_at(dir) {
         install_at(dir)?; // add_hook_entry is idempotent — only fills gaps
     }
     Ok(())

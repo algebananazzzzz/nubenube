@@ -1,5 +1,6 @@
-//! Tails ~/.claude/hooks/nube/events.jsonl and feeds Stop / UserPromptSubmit
-//! events into the drift state machine. Decoupled from Claude Code (events
+//! Tails ~/.claude/hooks/nube/events.jsonl and feeds
+//! SessionStart/UserPromptSubmit/Stop/SessionEnd events into the drift state
+//! machine. Decoupled from Claude Code (events
 //! queue on disk even while the app is closed); we start reading at EOF so only
 //! NEW events fire.
 
