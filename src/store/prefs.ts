@@ -6,18 +6,12 @@
 import { create } from 'zustand'
 
 export type Prefs = {
-  takeoverFinish: boolean
-  takeover2: boolean
-  takeover5: boolean
   sound: boolean
   companion: boolean
   introDone: boolean
 }
 
 const DEFAULTS: Prefs = {
-  takeoverFinish: true,
-  takeover2: true,
-  takeover5: true,
   sound: true,
   companion: true,
   introDone: false,

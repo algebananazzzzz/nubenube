@@ -18,7 +18,7 @@ import {
   greeting,
   type Phase,
 } from '../lib/derive'
-import { rescue, emitRescue } from '../lib/rescue'
+import { emitRescue } from '../lib/rescue'
 import type { Project } from '../types'
 
 // Representative life + away-time for the demo dock (browser preview only).
@@ -57,7 +57,6 @@ export function Home() {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
   const onAct = () => {
-    void rescue.hideTakeover()
     emitRescue('back')
   }
 

@@ -16,8 +16,6 @@ async function safe(cmd: string, args?: Record<string, unknown>) {
 }
 
 export const rescue = {
-  showTakeover: () => safe('nube_show_takeover'),
-  hideTakeover: () => safe('nube_hide_takeover'),
   setCompanion: (visible: boolean) => safe('nube_set_companion', { visible }),
   openMain: () => safe('nube_open_main'),
   setPaused: (paused: boolean) => safe('nube_set_paused', { paused }),

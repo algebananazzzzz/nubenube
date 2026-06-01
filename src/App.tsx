@@ -1,7 +1,6 @@
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { Companion } from './components/Companion'
-import { TakeoverWindow } from './components/Takeover'
 import { Home } from './pages/Home'
 import { ProjectDetail } from './pages/ProjectDetail'
 import { Insights } from './pages/Insights'
@@ -13,7 +12,6 @@ export default function App() {
       <Routes>
         {/* standalone OS windows */}
         <Route path="companion" element={<Companion />} />
-        <Route path="takeover" element={<TakeoverWindow />} />
 
         {/* the main window */}
         <Route element={<AppShell />}>

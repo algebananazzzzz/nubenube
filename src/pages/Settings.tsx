@@ -89,13 +89,6 @@ export function Settings() {
   const setDieMin = (m: number) => save({ sensitivity: { ...settings.sensitivity, decayPerMin: baseFrac / m } })
   const setGrace = (s: number) => save({ sensitivity: { ...settings.sensitivity, graceSecs: s } })
 
-  // flipping an individual rescue level also keeps the Rust intensity in sync
-  const toggleRescue = (key: 'takeoverFinish' | 'takeover2' | 'takeover5') => {
-    const next = { takeoverFinish: prefs.takeoverFinish, takeover2: prefs.takeover2, takeover5: prefs.takeover5, [key]: !prefs[key] }
-    prefs.set(key, !prefs[key])
-    save({ driftMomentIntensity: next.takeoverFinish || next.takeover2 || next.takeover5 ? 'overlay' : 'gentle-notification' })
-  }
-
   const connect = async (install: boolean) => {
     setBusy(true)
     await (install ? api.installHooks() : api.uninstallHooks())
@@ -171,17 +164,6 @@ export function Settings() {
               <DragBar label="Nube dies after" value={dieMin} min={1} max={15} step={1} hue={ACCENT} format={(v) => `${v} min · per waiting session`} onChange={setDieMin} />
               <DragBar label="grace before draining" value={settings.sensitivity.graceSecs} min={0} max={120} step={5} hue={ACCENT} format={(v) => `${v}s`} onChange={setGrace} />
             </div>
-          </Card>
-
-          <Card pad={18}>
-            <div className="nn-disp" style={{ fontWeight: 800, fontSize: 16, color: INK, marginBottom: 4 }}>full-screen rescues</div>
-            <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT, marginBottom: 8 }}>when to take over your screen to drag you back</div>
-            {([['the moment Claude finishes', 'takeoverFinish'], ['at the 2-minute mark', 'takeover2'], ['at the 5-minute mark', 'takeover5']] as const).map(([label, key], i) => (
-              <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderTop: i === 0 ? 'none' : '1px solid rgba(120,100,170,.1)' }}>
-                <span style={{ fontWeight: 600, fontSize: 13.5, color: INK }}>{label}</span>
-                <Toggle on={prefs[key]} hue={ACCENT} onClick={() => toggleRescue(key)} />
-              </div>
-            ))}
           </Card>
 
           <Card pad={18}>

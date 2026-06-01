@@ -3,24 +3,19 @@
 // companion windows from live focus-ticks. Also hosts the first-launch intro and
 // (on sample data) a demo dock to preview the rare phases without drifting.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useFocus } from '../store/focus'
 import { useUsage } from '../store/usage'
 import { usePrefs } from '../store/prefs'
-import { useDemo, type TakeoverLevel } from '../store/demo'
+import { useDemo } from '../store/demo'
 import { NubeCreature } from './NubeCreature'
 import { LifeBar, Dot, INK, SUB, shadow, elev } from './ui'
 import { IntroStory } from './IntroStory'
-import { TakeoverView } from './Takeover'
 import { hueClay } from '../lib/clay'
 import { BASE_LIFE, phaseFromTick, lifeFromHealth, type Phase } from '../lib/derive'
-import { rescue, onRescue } from '../lib/rescue'
-import { playChime } from '../lib/sound'
+import { rescue } from '../lib/rescue'
 import { isTauri } from '../lib/api'
-
-const RANK: Record<TakeoverLevel, number> = { finish: 0, '2min': 1, '5min': 2 }
-const REMIND_MIN = 2 // minutes to snooze a rescue after "I'm back" (was a user pref)
 
 const NAV: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
   { to: '/', label: 'Home', end: true, icon: <path d="M4 11 12 4l8 7v8a1.4 1.4 0 0 1-1.4 1.4H5.4A1.4 1.4 0 0 1 4 19z" /> },
@@ -61,9 +56,6 @@ export function AppShell() {
   const demo = useDemo()
 
   const [introOpen, setIntroOpen] = useState(!prefs.introDone)
-  const shownLevel = useRef<TakeoverLevel | null>(null)
-  const snoozedLevel = useRef<TakeoverLevel | null>(null)
-  const snoozeUntil = useRef(0)
 
   useEffect(() => { void subscribe(); void loadAll() }, [subscribe, loadAll])
 
@@ -72,52 +64,6 @@ export function AppShell() {
 
   // intro replay (demo)
   useEffect(() => { if (demo.introNonce > 0) setIntroOpen(true) }, [demo.introNonce])
-
-  // listen for what the user did in the takeover window.
-  // 'back' = a short grace to switch apps (else the supervisor would re-pop the
-  // takeover next tick since we're still on the distraction app). 'snooze' = the
-  // user's reminder cadence. Reads live prefs via getState() to stay fresh.
-  useEffect(() => {
-    let un: (() => void) | undefined
-    let dead = false
-    onRescue((a) => {
-      const p = usePrefs.getState()
-      snoozeUntil.current = Date.now() + (a === 'snooze' ? REMIND_MIN * 60_000 : 12_000)
-      snoozedLevel.current = shownLevel.current
-      shownLevel.current = null
-      if (p.sound) playChime('relief')
-    }).then((f) => { if (dead) f(); else un = f })
-    return () => { dead = true; un?.() }
-  }, [])
-
-  // the supervisor: decide whether the real takeover window should be up.
-  // A strictly-worse level bypasses an active snooze so escalation is never muted.
-  useEffect(() => {
-    if (!isTauri) return
-    const phase = phaseFromTick(tick)
-    let target: TakeoverLevel | null = null
-    if (phase === 'waiting' || phase === 'draining') target = prefs.takeoverFinish ? 'finish' : null
-    else if (phase === 'critical') target = prefs.takeover2 ? '2min' : prefs.takeoverFinish ? 'finish' : null
-    else if (phase === 'fading') target = prefs.takeover5 ? '5min' : prefs.takeover2 ? '2min' : prefs.takeoverFinish ? 'finish' : null
-
-    const now = Date.now()
-    const escalated = target != null && snoozedLevel.current != null && RANK[target] > RANK[snoozedLevel.current]
-    const snoozed = now < snoozeUntil.current && !escalated
-
-    if (target && !snoozed) {
-      if (shownLevel.current !== target) {
-        shownLevel.current = target
-        snoozeUntil.current = 0
-        snoozedLevel.current = null
-        void rescue.showTakeover()
-        if (prefs.sound) playChime('danger')
-      }
-    } else if (!target && shownLevel.current !== null) {
-      shownLevel.current = null
-      void rescue.hideTakeover()
-      if (prefs.sound) playChime('relief')
-    }
-  }, [tick, prefs.takeoverFinish, prefs.takeover2, prefs.takeover5, prefs.sound])
 
   const phase = demo.phase ?? phaseFromTick(tick)
   const project = projects.find((p) => p.id === tick.activeProjectId) ?? [...projects].sort((a, b) => b.waterMl - a.waterMl)[0]
@@ -170,22 +116,12 @@ export function AppShell() {
         </div>
       </div>
 
-      {/* in-app takeover overlay (browser/demo preview only — real Tauri uses the OS window) */}
-      {!isTauri && demo.takeover && (
-        <TakeoverView level={demo.takeover} secs={demo.takeover === 'finish' ? 6 : demo.takeover === '2min' ? 132 : 322} life={demo.takeover === 'finish' ? 86 : demo.takeover === '2min' ? 36 : 13} hue={hue} onBack={() => { demo.setTakeover(null); if (prefs.sound) playChime('relief') }} onSnooze={() => { demo.setTakeover(null); if (prefs.sound) playChime('relief') }} />
-      )}
-
       {/* demo dock (sample-data mode) */}
       {showDock && (
         <div style={{ position: 'fixed', bottom: 15, left: '50%', transform: 'translateX(-50%)', zIndex: 400, display: 'flex', alignItems: 'center', gap: 11, background: 'rgba(44,37,68,.84)', backdropFilter: 'blur(16px)', borderRadius: 14, padding: '8px 13px', boxShadow: '0 20px 44px -18px rgba(36,28,66,.7)', border: '1px solid rgba(255,255,255,.08)' }}>
           <span style={{ fontWeight: 700, fontSize: 9.5, color: 'rgba(255,255,255,.5)', letterSpacing: '.08em', textTransform: 'uppercase' }}>demo</span>
           <div style={{ display: 'flex', gap: 4 }}>
             {DEMO_PHASES.map((p) => <DockBtn key={p} on={demo.phase === p} onClick={() => demo.setPhase(demo.phase === p ? null : p)}>{p}</DockBtn>)}
-          </div>
-          <span style={{ width: 1, height: 19, background: 'rgba(255,255,255,.18)' }} />
-          <span style={{ fontWeight: 700, fontSize: 9.5, color: 'rgba(255,255,255,.5)' }}>rescue</span>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {(['finish', '2min', '5min'] as TakeoverLevel[]).map((l) => <DockBtn key={l} on danger onClick={() => { demo.setTakeover(l); if (prefs.sound) playChime('danger') }}>{l}</DockBtn>)}
           </div>
           <span style={{ width: 1, height: 19, background: 'rgba(255,255,255,.18)' }} />
           <DockBtn on={false} onClick={() => demo.replayIntro()}>↻ intro</DockBtn>
