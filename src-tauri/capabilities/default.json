@@ -20,6 +20,6 @@
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
     "updater:default",
-    "process:allow-relaunch"
+    "process:allow-restart"
   ]
 }
