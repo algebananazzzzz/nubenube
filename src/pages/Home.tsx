@@ -18,7 +18,8 @@ import {
   greeting,
   type Phase,
 } from '../lib/derive'
-import { emitRescue } from '../lib/rescue'
+import { rescue } from '../lib/rescue'
+import { isTauri } from '../lib/api'
 import type { Project } from '../types'
 
 // Representative life + away-time for the demo dock (browser preview only).
@@ -56,9 +57,7 @@ export function Home() {
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
-  const onAct = () => {
-    emitRescue('back')
-  }
+  const onAct = () => { if (isTauri) void rescue.openMain().catch(() => {}) }
 
   return (
     <div className="nn-ui" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 14, padding: '20px 22px', overflow: 'hidden' }}>
