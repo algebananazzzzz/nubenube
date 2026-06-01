@@ -212,6 +212,62 @@ Verification gate (per repo memory): `npm run build` + `cargo test` (not
 ## 11. Open question (carry into planning)
 
 - **Reset wiping banked bonus:** §6 resets `life = baseline`, discarding any
-  bonus you'd banked the day before. Alternative: reset only lifts you *up* to
-  baseline if below, preserving banked bonus. Default chosen = hard reset to
-  baseline (simplest, "fresh day"); revisit if it feels punishing.
+  bonus you'd banked the day before. **Decided:** hard reset to `baseline = 100`
+  each day ("fresh day"). Banked burst does not carry over.
+
+## 12. Session lifecycle — close removes from counts
+
+Closing a Claude session (Ctrl+D, or Ctrl+C that exits) must **immediately** drop
+it from the running/waiting counts so the overlay never shows a phantom
+"waiting"/"working" for a session you've left.
+
+- `SessionEnd` is already wired (`events_tail` → `handle_end` → removes the
+  session). Keep this path; verify it reaches the map for every exit reason.
+- **Fallback (in case some exits don't fire `SessionEnd`):** a subagent is
+  confirming Claude Code's hook behavior. If exits can miss `SessionEnd`, lower
+  the stale-session eviction (`ABANDON_SECS`, currently 1800s) and/or treat a
+  session whose process is gone as ended. Implement whatever the hook findings
+  require; the user-visible contract is: **close it → it leaves the counts within
+  a tick or two.**
+- An interrupted-but-not-exited turn (Ctrl+C mid-response) should move
+  `Running → Waiting` if `Stop` fires, else stay until the (lowered) staleness
+  bound. Confirm against the hook findings.
+
+## 13. Implementation contract (fixed names — parallel agents implement to this)
+
+**Constants (`drift.rs`):** `BASELINE: f64 = 100.0`, `BONUS_RATIO: f64 = 0.3`,
+`CAP: f64 = BASELINE * (1.0 + BONUS_RATIO)` = 130.0.
+
+**Settings (`settings.rs`, camelCase JSON):** in the sensitivity block, **remove**
+`decayPerMin`, `recoveryPerToken`; **add** `timeToDeathMin: f64 = 12.0`,
+`healDrainRatio: f64 = 0.1`; **keep** `graceSecs (=10)`, `idleThresholdSecs (=120)`,
+`windowGranularity`. Top-level `Settings` unchanged except behavior of
+`resetTimeLocal` is now honored. `waterRates`/`water.rs` stay (Insights analytics).
+
+**FocusTick DTO (`dto.rs` ⇄ `types.ts`, camelCase):** keep all current fields;
+**repurpose `cloudHealth` to mean `life` on the 0..130 scale** (do NOT rename — keep
+`cloudHealth`/`cloud_health` to limit churn); **add** `baseline: f64` (100) and
+`cap: f64` (130). `secondsToDeath` stays but is now the honest **net-rate**
+countdown (Some only while net-draining). `state` ∈
+`{"drifting","waiting","working","idle","paused"}` (rename old `"growing"`→`"working"`).
+
+**Pure, unit-tested fns (`drift.rs`):**
+- `life_rate(on_distraction, waiting, running, baseline, time_to_death_min, ratio) -> f64`
+  returns net %-points/min = `ratio·R·running − (on_distraction ? R·waiting : 0)`,
+  where `R = baseline / time_to_death_min`.
+- `apply_life(life, dt, rate, frozen) -> f64` = `frozen ? life : clamp(life + rate·dt/60, 0, CAP)`.
+- `countdown_secs(life, rate) -> Option<i64>` = `rate < 0 ? Some((life / -rate)·60) : None`.
+
+**Persistence/migration (`db.rs`):** `load_health` default and `reset_all_health`
+baseline become `BASELINE` (100). Old `cloud_health` values are on the 0..1 scale;
+on upgrade, reset all `biome_state.cloud_health` to `BASELINE` once (bump a stored
+schema/settings version, or detect value ≤ `CAP/100` and reset). Daily reset sets
+`cloud_health = BASELINE`.
+
+**Frontend (`derive.ts`):** rebase `BASE_LIFE`→100, `lifeFromHealth(h)=round(clamp(h,0,cap))`,
+mood thresholds per §4 relative to `baseline`/`cap`; drop the 120/300s escalation.
+`Companion.tsx` overlay states per §5 (already mostly aligned). `Settings.tsx`
+swaps the two sliders for the §7 set and renders the 0–130 bar with a 100 marker.
+
+**Disjoint file sets** → backend (`*.rs`) and frontend (`src/**`) can be built in
+parallel against this contract; integration verified by `cargo test` + `npm run build`.
