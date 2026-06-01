@@ -1,4 +1,4 @@
-// Generic formatters (water/units live in theme/units.ts).
+// Generic formatters (durations, compact counts, paths).
 
 export function formatDuration(secs: number): string {
   if (!secs || secs < 0) return '0m'

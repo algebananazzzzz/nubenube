@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
 
 use crate::settings::Settings;
 use crate::{connector, db, dto::*, hooks_installer, store_paths};
@@ -25,16 +25,15 @@ fn conn_status(db_path: &Path) -> ConnectionStatus {
     let installed = hooks_installer::is_installed();
     match db::open(db_path) {
         Ok(c) => db::connection_stats(&c, roots, installed),
-        Err(_) => ConnectionStatus {
-            connected: false,
-            log_roots: roots,
-            projects_detected: 0,
-            sessions_scanned: 0,
-            hooks_installed: installed,
-            last_scan_utc: None,
-            naive_dedup_ratio: None,
-            permissions: Permissions { screen_recording: false, automation: false },
-        },
+        Err(_) => {
+            let _ = roots;
+            ConnectionStatus {
+                connected: false,
+                projects_detected: 0,
+                sessions_scanned: 0,
+                hooks_installed: installed,
+            }
+        }
     }
 }
 
@@ -62,22 +61,14 @@ pub fn get_connection_status(state: State<AppState>) -> ConnectionStatus {
 }
 
 #[tauri::command]
-pub fn get_project_detail(state: State<AppState>, id: String) -> Option<ProjectDetail> {
-    db::open(&state.db_path).ok().and_then(|c| db::get_project_detail(&c, &id))
+pub fn get_project_detail(state: State<AppState>, id: String, range: String) -> Option<ProjectDetail> {
+    db::open(&state.db_path).ok().and_then(|c| db::get_project_detail(&c, &id, &range))
 }
 
 #[tauri::command]
 pub fn rescan_logs(state: State<AppState>) -> ConnectionStatus {
     connector::scan_all(&state.db_path);
     conn_status(&state.db_path)
-}
-
-#[tauri::command]
-pub fn export_data(state: State<AppState>) -> String {
-    let projects = db::open(&state.db_path)
-        .map(|c| db::get_projects(&c))
-        .unwrap_or_default();
-    serde_json::to_string_pretty(&projects).unwrap_or_else(|_| "[]".to_string())
 }
 
 #[tauri::command]
@@ -103,23 +94,13 @@ pub fn uninstall_hooks(state: State<AppState>) -> ConnectionStatus {
     conn_status(&state.db_path)
 }
 
-#[tauri::command]
-pub fn request_permission(kind: String, state: State<AppState>) -> ConnectionStatus {
-    // App-level focus tracking needs no permission. Window-title / browser-URL
-    // permissions (Screen Recording / Automation) are a later opt-in upgrade.
-    let _ = kind;
-    conn_status(&state.db_path)
-}
-
-#[tauri::command]
-pub fn reset_today(state: State<AppState>) {
-    if let Ok(c) = db::open(&state.db_path) {
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        db::reset_all_health(&c, 0.7, &today);
-    }
-}
-
 // ── desktop companion window ──────────────────────────────────────────────
+
+/// Initial companion window size (logical px) — just a first guess for the very
+/// first paint. The webview measures its real content and calls
+/// `nube_resize_companion` to fit exactly, so this never clips: the window
+/// always tracks the card/pill's intrinsic size.
+pub const COMPANION_FULL: (f64, f64) = (232.0, 300.0);
 
 /// Nestle the always-on-top companion into the bottom-right of its monitor.
 pub fn position_companion(w: &WebviewWindow) {
@@ -132,9 +113,12 @@ pub fn position_companion(w: &WebviewWindow) {
         let scale = mon.scale_factor();
         let msize = mon.size();
         let mpos = mon.position();
-        let win = w
-            .outer_size()
-            .unwrap_or_else(|_| PhysicalSize::new((196.0 * scale) as u32, (214.0 * scale) as u32));
+        let win = w.outer_size().unwrap_or_else(|_| {
+            PhysicalSize::new(
+                (COMPANION_FULL.0 * scale) as u32,
+                (COMPANION_FULL.1 * scale) as u32,
+            )
+        });
         let margin = (24.0 * scale) as i32;
         let dock = (40.0 * scale) as i32; // clear the macOS dock / taskbar
         let x = mpos.x + msize.width as i32 - win.width as i32 - margin;
@@ -152,14 +136,20 @@ pub fn nube_open_main(app: AppHandle) {
     }
 }
 
-/// macOS: make the companion float over EVERYTHING — full-screen apps and all
-/// Spaces — and be draggable by its whole background. Tauri's always_on_top /
-/// visible_on_all_workspaces don't cover full-screen; this sets the native
-/// NSWindow level + collection behavior directly. No-op on other platforms.
+/// macOS: make the companion float over EVERYTHING — other apps' full-screen
+/// Spaces and all regular Spaces — and be draggable by its whole background.
+///
+/// IMPORTANT: the level + collectionBehavior set here are necessary but NOT
+/// sufficient on their own. macOS blocks a Regular-activation-policy app from
+/// another app's native-full-screen Space no matter how high the window level
+/// is — so this only actually covers full-screen apps because the app runs as
+/// ActivationPolicy::Accessory (set in lib.rs setup). Don't "fix" a
+/// not-over-fullscreen regression by bumping the level; check the policy first.
+/// No-op on other platforms.
 #[cfg(target_os = "macos")]
 pub fn apply_macos_overlay(w: &WebviewWindow) {
-    use objc::runtime::{Object, YES};
-    use objc::{msg_send, sel, sel_impl};
+    use objc::runtime::{Object, YES, NO};
+    use objc::{class, msg_send, sel, sel_impl};
     if let Ok(ptr) = w.ns_window() {
         let ns = ptr as *mut Object;
         unsafe {
@@ -170,6 +160,14 @@ pub fn apply_macos_overlay(w: &WebviewWindow) {
             let _: () = msg_send![ns, setCollectionBehavior: 273_usize];
             // drag the window by clicking anywhere on its background.
             let _: () = msg_send![ns, setMovableByWindowBackground: YES];
+            // Tauri's transparent(true) clears the NSWindow background but the
+            // WKWebView (contentView) still draws its own gray fill. Clear that too.
+            let content_view: *mut Object = msg_send![ns, contentView];
+            if !content_view.is_null() {
+                let _: () = msg_send![content_view, setOpaque: NO];
+                let clear: *mut Object = msg_send![class!(NSColor), clearColor];
+                let _: () = msg_send![content_view, setBackgroundColor: clear];
+            }
         }
     }
 }
@@ -188,6 +186,38 @@ pub fn nube_set_companion(app: AppHandle, visible: bool) {
         } else {
             let _ = w.hide();
         }
+    }
+}
+
+/// Size the companion window to the exact size the webview measured for its
+/// content (logical px), so the card/pill is never clipped and never padded
+/// with dead space. We pin the window's BOTTOM-RIGHT corner across the resize
+/// so it grows up/left from wherever it currently sits — it never slides under
+/// the Dock and a user-dragged position is preserved.
+/// Sync command → runs on the main thread, so the pre-resize rect we read is
+/// the real one. Re-assert the macOS overlay after resizing.
+#[tauri::command]
+pub fn nube_resize_companion(app: AppHandle, width: f64, height: f64) {
+    if let Some(w) = app.get_webview_window("companion") {
+        if width < 1.0 || height < 1.0 {
+            return;
+        }
+        let scale = w.scale_factor().unwrap_or(1.0);
+        let new_w = (width * scale).round() as i32;
+        let new_h = (height * scale).round() as i32;
+        // bottom-right corner (physical px) BEFORE the resize → our anchor.
+        let anchor = match (w.outer_position(), w.outer_size()) {
+            (Ok(pos), Ok(size)) => Some((pos.x + size.width as i32, pos.y + size.height as i32)),
+            _ => None,
+        };
+        let _ = w.set_size(LogicalSize::new(width, height));
+        match anchor {
+            Some((right, bottom)) => {
+                let _ = w.set_position(PhysicalPosition::new(right - new_w, bottom - new_h));
+            }
+            None => position_companion(&w), // no rect yet → dock to the corner
+        }
+        apply_macos_overlay(&w);
     }
 }
 

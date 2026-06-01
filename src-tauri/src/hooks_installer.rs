@@ -1,10 +1,11 @@
 //! Non-destructive Claude Code hook installer.
 //!
-//! Appends SessionStart/UserPromptSubmit/Stop/SessionEnd hooks to
-//! ~/.claude/settings.json (user scope = all projects) that write a small
-//! event line to
-//! ~/.claude/hooks/nube/events.jsonl. We deep-merge into the existing JSON,
-//! preserving the user's other hooks (e.g. Notification) and statusLine, and
+//! Appends SessionStart/UserPromptSubmit/Stop/SessionEnd hooks plus the
+//! mid-turn block hooks (PreToolUse[AskUserQuestion] + Notification → `wait`,
+//! PostToolUse → `reengage`) to ~/.claude/settings.json (user scope = all
+//! projects) that write a small event line to ~/.claude/hooks/nube/events.jsonl.
+//! We deep-merge into the existing JSON, preserving the user's other hooks (a
+//! pre-existing Notification entry is kept alongside ours) and statusLine, and
 //! back the file up once before the first edit.
 
 use std::path::{Path, PathBuf};
@@ -13,7 +14,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 const HOOK_SCRIPT: &str = r#"#!/usr/bin/env bash
-# Nube Nube hook bridge. $1 = event name (start | reengage | stop | end).
+# Nube Nube hook bridge. $1 = event name (start | reengage | stop | end | wait).
 # Reads the Claude Code hook JSON from stdin and appends a compact event line.
 set -euo pipefail
 dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/nube"
@@ -65,7 +66,7 @@ fn entry_is_nube(entry: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn add_hook_entry(root: &mut Value, event: &str, command: &str) {
+fn add_hook_entry(root: &mut Value, event: &str, command: &str, matcher: Option<&str>) {
     let hooks = root
         .as_object_mut()
         .unwrap()
@@ -82,9 +83,15 @@ fn add_hook_entry(root: &mut Value, event: &str, command: &str) {
     if arr.iter().any(entry_is_nube) {
         return; // already present — idempotent
     }
-    arr.push(json!({
+    let mut entry = json!({
         "hooks": [ { "type": "command", "command": command, "timeout": 5 } ]
-    }));
+    });
+    // PreToolUse/PostToolUse entries carry a tool-name matcher; the lifecycle and
+    // Notification hooks have none (they apply unconditionally).
+    if let Some(m) = matcher {
+        entry.as_object_mut().unwrap().insert("matcher".to_string(), json!(m));
+    }
+    arr.push(entry);
 }
 
 pub fn install_at(dir: &Path) -> Result<()> {
@@ -115,10 +122,17 @@ pub fn install_at(dir: &Path) -> Result<()> {
     }
 
     let base = format!("bash '{}'", script.display());
-    add_hook_entry(&mut root, "SessionStart", &format!("{base} start"));
-    add_hook_entry(&mut root, "UserPromptSubmit", &format!("{base} reengage"));
-    add_hook_entry(&mut root, "Stop", &format!("{base} stop"));
-    add_hook_entry(&mut root, "SessionEnd", &format!("{base} end"));
+    add_hook_entry(&mut root, "SessionStart", &format!("{base} start"), None);
+    add_hook_entry(&mut root, "UserPromptSubmit", &format!("{base} reengage"), None);
+    add_hook_entry(&mut root, "Stop", &format!("{base} stop"), None);
+    add_hook_entry(&mut root, "SessionEnd", &format!("{base} end"), None);
+    // Mid-turn: Claude blocked on you → Waiting. A "userchoose" prompt is the
+    // AskUserQuestion tool (caught at PreToolUse); permission/idle prompts arrive
+    // via Notification. Resume to Running the instant ANY tool completes — that's
+    // you having answered/granted — so PostToolUse matches all tools.
+    add_hook_entry(&mut root, "PreToolUse", &format!("{base} wait"), Some("AskUserQuestion"));
+    add_hook_entry(&mut root, "Notification", &format!("{base} wait"), None);
+    add_hook_entry(&mut root, "PostToolUse", &format!("{base} reengage"), Some("*"));
 
     std::fs::write(&settings_path, serde_json::to_string_pretty(&root)?)?;
     Ok(())
@@ -126,21 +140,33 @@ pub fn install_at(dir: &Path) -> Result<()> {
 
 pub fn uninstall_at(dir: &Path) -> Result<()> {
     let settings_path = dir.join("settings.json");
-    if !settings_path.exists() {
-        return Ok(());
-    }
-    let txt = std::fs::read_to_string(&settings_path)?;
-    let mut root: Value = serde_json::from_str(&txt).unwrap_or_else(|_| json!({}));
-    for ev in ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"] {
-        if let Some(arr) = root
-            .get_mut("hooks")
-            .and_then(|h| h.get_mut(ev))
-            .and_then(|a| a.as_array_mut())
-        {
-            arr.retain(|entry| !entry_is_nube(entry));
+    if settings_path.exists() {
+        let txt = std::fs::read_to_string(&settings_path)?;
+        let mut root: Value = serde_json::from_str(&txt).unwrap_or_else(|_| json!({}));
+        for ev in [
+            "SessionStart",
+            "UserPromptSubmit",
+            "Stop",
+            "SessionEnd",
+            "PreToolUse",
+            "PostToolUse",
+            "Notification",
+        ] {
+            if let Some(arr) = root
+                .get_mut("hooks")
+                .and_then(|h| h.get_mut(ev))
+                .and_then(|a| a.as_array_mut())
+            {
+                arr.retain(|entry| !entry_is_nube(entry));
+            }
         }
+        std::fs::write(&settings_path, serde_json::to_string_pretty(&root)?)?;
     }
-    std::fs::write(&settings_path, serde_json::to_string_pretty(&root)?)?;
+    // Remove the script and its directory so ensure_installed doesn't re-add on next launch.
+    let nube_dir = dir.join("hooks").join("nube");
+    if nube_dir.exists() {
+        let _ = std::fs::remove_dir_all(&nube_dir);
+    }
     Ok(())
 }
 
@@ -153,7 +179,17 @@ pub fn is_installed_at(dir: &Path) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"].iter().all(|ev| {
+    [
+        "SessionStart",
+        "UserPromptSubmit",
+        "Stop",
+        "SessionEnd",
+        "PreToolUse",
+        "PostToolUse",
+        "Notification",
+    ]
+    .iter()
+    .all(|ev| {
         root.get("hooks")
             .and_then(|h| h.get(*ev))
             .and_then(|a| a.as_array())
@@ -220,6 +256,19 @@ mod tests {
         assert!(after["hooks"]["UserPromptSubmit"].as_array().unwrap().iter().any(entry_is_nube));
         assert!(after["hooks"]["SessionStart"].as_array().unwrap().iter().any(entry_is_nube));
         assert!(after["hooks"]["SessionEnd"].as_array().unwrap().iter().any(entry_is_nube));
+        // mid-turn hooks added with the right matchers + event suffixes
+        let pre = after["hooks"]["PreToolUse"].as_array().unwrap();
+        let pre_nube = pre.iter().find(|e| entry_is_nube(e)).expect("PreToolUse nube entry");
+        assert_eq!(pre_nube["matcher"], "AskUserQuestion");
+        assert!(pre_nube["hooks"][0]["command"].as_str().unwrap().ends_with(" wait"));
+        let post = after["hooks"]["PostToolUse"].as_array().unwrap();
+        let post_nube = post.iter().find(|e| entry_is_nube(e)).expect("PostToolUse nube entry");
+        assert_eq!(post_nube["matcher"], "*");
+        assert!(post_nube["hooks"][0]["command"].as_str().unwrap().ends_with(" reengage"));
+        // our Notification entry is added ALONGSIDE the user's terminal-notifier
+        let notif = after["hooks"]["Notification"].as_array().unwrap();
+        assert!(notif.iter().any(entry_is_nube));
+        assert!(notif.iter().any(|e| e["hooks"][0]["command"] == "terminal-notifier"));
         // backup
         assert!(dir.join("settings.json.nube-backup").exists());
         assert!(script_path_in(&dir).exists());
@@ -229,13 +278,27 @@ mod tests {
         let after2: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
         assert_eq!(after2["hooks"]["Stop"].as_array().unwrap().len(), 1);
+        assert_eq!(after2["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+        // user's terminal-notifier + our one nube entry, no duplication
+        assert_eq!(after2["hooks"]["Notification"].as_array().unwrap().len(), 2);
 
-        // uninstall restores
+        // uninstall restores settings and removes script dir
         uninstall_at(&dir).unwrap();
         assert!(!is_installed_at(&dir));
         let after3: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
-        assert!(after3["hooks"]["Notification"].as_array().unwrap().len() >= 1);
+        // our Notification entry removed, the user's terminal-notifier preserved
+        let notif3 = after3["hooks"]["Notification"].as_array().unwrap();
+        assert!(!notif3.iter().any(entry_is_nube));
+        assert!(notif3.iter().any(|e| e["hooks"][0]["command"] == "terminal-notifier"));
+        // mid-turn tool hooks removed
+        assert!(!after3["hooks"]["PreToolUse"].as_array().unwrap().iter().any(entry_is_nube));
+        assert!(!after3["hooks"]["PostToolUse"].as_array().unwrap().iter().any(entry_is_nube));
+        assert!(!script_path_in(&dir).exists(), "script should be deleted on uninstall");
+        assert!(!dir.join("hooks").join("nube").exists(), "nube dir should be deleted on uninstall");
+        // ensure_installed must NOT re-add after uninstall (no script on disk)
+        ensure_installed_at(&dir).unwrap();
+        assert!(!is_installed_at(&dir), "ensure_installed must not re-add after uninstall");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -256,7 +319,15 @@ mod tests {
         ensure_installed_at(&dir).unwrap();
         assert!(is_installed_at(&dir));
         let after: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
-        for ev in ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"] {
+        for ev in [
+            "SessionStart",
+            "UserPromptSubmit",
+            "Stop",
+            "SessionEnd",
+            "PreToolUse",
+            "PostToolUse",
+            "Notification",
+        ] {
             assert!(after["hooks"][ev].as_array().unwrap().iter().any(entry_is_nube), "{ev} not repaired");
         }
         let _ = std::fs::remove_dir_all(&dir);

@@ -1,132 +1,135 @@
-// AppShell — the main window: custom titlebar, sidebar nav, and the live
-// home-bloop life widget. The companion pref drives the always-on-top desktop
-// companion window. Also hosts the first-launch intro and (on sample data) a
-// demo dock to preview the rare phases without drifting.
+// AppShell — the main window chrome: custom titlebar (native macOS traffic
+// lights overlay on the left), Helios sidebar nav + the live "Nube now" status
+// chip, and the page header. Injects the theme + per-project accent/clay vars.
 
-import { useEffect, useState, type ReactNode } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect, type ReactNode } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useFocus } from '../store/focus'
 import { useUsage } from '../store/usage'
 import { usePrefs } from '../store/prefs'
-import { useDemo } from '../store/demo'
-import { NubeCreature } from './NubeCreature'
-import { LifeBar, Dot, INK, SUB, shadow, elev } from './ui'
-import { IntroStory } from './IntroStory'
-import { hueClay } from '../lib/clay'
-import { BASE_LIFE, phaseFromTick, lifeFromHealth, type Phase } from '../lib/derive'
-import { rescue } from '../lib/rescue'
 import { isTauri } from '../lib/api'
+import { rescue } from '../lib/rescue'
+import { useNube, statusFor } from '../lib/derive'
+import { themeVars } from '../lib/clay'
+import { Nube } from './NubeCreature'
+import { Dot } from './ui'
 
-const NAV: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
-  { to: '/', label: 'Home', end: true, icon: <path d="M4 11 12 4l8 7v8a1.4 1.4 0 0 1-1.4 1.4H5.4A1.4 1.4 0 0 1 4 19z" /> },
-  { to: '/insights', label: 'Insights', icon: <path d="M4 17 9 11l3.5 3.5L20 6" /> },
-  { to: '/settings', label: 'Settings', icon: <g><circle cx="12" cy="12" r="3" /><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" /></g> },
+type NavDef = { key: string; to: string; label: string; icon: (a: boolean) => ReactNode }
+
+const NAV: NavDef[] = [
+  { key: 'home', to: '/', label: 'Home', icon: (a) => <path d="M3 9.5L11 3l8 6.5V19a1 1 0 0 1-1 1h-4v-6H8v6H4a1 1 0 0 1-1-1z" fill={a ? 'currentColor' : 'none'} stroke={a ? 'none' : 'currentColor'} strokeWidth="1.6" strokeLinejoin="round" /> },
+  { key: 'insights', to: '/insights', label: 'Insights', icon: () => <g fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M4 19V5" /><path d="M4 19h15" /><path d="M8 15l3-4 3 2 4-6" /></g> },
+  { key: 'settings', to: '/settings', label: 'Settings', icon: () => <g fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="11" cy="11" r="3" /><path d="M11 1.5v3M11 17.5v3M1.5 11h3M17.5 11h3M4.5 4.5l2 2M15.5 15.5l2 2M17.5 4.5l-2 2M6.5 15.5l-2 2" strokeLinecap="round" /></g> },
 ]
 
-const DEMO_PHASES: Phase[] = ['working', 'idle', 'waiting', 'draining', 'critical', 'fading', 'faint']
+const HEADERS: Record<string, { title: string; subtitle: string }> = {
+  home: { title: 'Home', subtitle: 'Your live companion' },
+  insights: { title: 'Insights', subtitle: 'Focus and output over time' },
+  settings: { title: 'Settings', subtitle: 'Tune how Nube responds' },
+  project: { title: 'Project', subtitle: 'Token composition' },
+}
 
-function NavItem({ to, label, icon, end, hue }: { to: string; label: string; icon: ReactNode; end?: boolean; hue: number }) {
-  const c = hueClay(hue)
+function NavItem({ item }: { item: NavDef }) {
   return (
-    <NavLink to={to} end={end} style={{ textDecoration: 'none' }}>
+    <NavLink to={item.to} end={item.to === '/'} style={{ textDecoration: 'none' }}>
       {({ isActive }) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 11, width: '100%', borderRadius: 11, padding: '9px 12px', background: isActive ? '#fff' : 'transparent', boxShadow: isActive ? shadow.sm : 'none', border: isActive ? elev.border : '1px solid transparent', transition: 'background .15s ease' }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isActive ? c.deep : 'rgba(96,86,134,.7)'} strokeWidth={isActive ? 2.3 : 2} strokeLinecap="round" strokeLinejoin="round">{icon}</svg>
-          <span style={{ fontWeight: isActive ? 800 : 600, fontSize: 13.5, color: isActive ? INK : 'rgba(80,72,118,.78)', letterSpacing: '.01em' }}>{label}</span>
+        <div className="nn-ui" style={{
+          position: 'relative', display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+          padding: '8px 11px', borderRadius: 'var(--r-md)',
+          background: isActive ? 'var(--surface-strong)' : 'transparent',
+          border: '1px solid transparent',
+          color: isActive ? 'var(--ink)' : 'var(--faint)', fontSize: 13.5, fontWeight: isActive ? 600 : 500,
+          transition: 'background .14s var(--ease), color .14s',
+        }}>
+          {isActive && <span style={{ position: 'absolute', left: -13, top: '50%', transform: 'translateY(-50%)', width: 3, height: 18, borderRadius: 2, background: 'var(--accent)' }} />}
+          <svg width="19" height="19" viewBox="0 0 22 22" style={{ color: isActive ? 'var(--accent-text)' : 'currentColor' }}>{item.icon(isActive)}</svg>
+          {item.label}
         </div>
       )}
     </NavLink>
   )
 }
 
-function DockBtn({ on, onClick, children, danger }: { on: boolean; onClick: () => void; children: ReactNode; danger?: boolean }) {
+// sidebar status chip — life, status (or live countdown), click → Home
+function HomeBloop() {
+  const s = useNube()
+  const st = statusFor(s.effState, s.appName)
+  const drift = s.remaining != null
+  const cdTone = s.life < 30 ? 'var(--critical)' : 'var(--warning)'
   return (
-    <button onClick={onClick} style={{ border: 'none', cursor: 'pointer', borderRadius: 8, padding: '6px 10px', fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 11.5, background: on ? (danger ? 'linear-gradient(165deg,#f3a86a,#e87a52)' : 'rgba(255,255,255,.94)') : 'rgba(255,255,255,.1)', color: on ? (danger ? '#fff' : '#36324f') : 'rgba(255,255,255,.72)', transition: 'all .15s ease', whiteSpace: 'nowrap' }}>{children}</button>
+    <NavLink to="/" end style={{ textDecoration: 'none' }}>
+      <div className="nn-ui" style={{
+        display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 10px',
+        borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface)', textAlign: 'left',
+      }}>
+        <div style={{ width: 38, height: 38, borderRadius: 'var(--r-sm)', overflow: 'hidden', flexShrink: 0, border: '1px solid var(--line-faint)', background: 'var(--surface-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Nube mood={s.mood} size={36} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+            <span className="nn-num" style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', lineHeight: 1 }}>{Math.round(s.life)}</span>
+            <span className="nn-num" style={{ fontSize: 11, color: 'var(--faint)' }}>%</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4 }}>
+            <Dot tone={drift ? cdTone : st.tone} size={6} pulse={st.pulse} />
+            <span className={drift ? 'nn-num' : undefined} style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: drift ? cdTone : 'var(--faint)', fontWeight: drift ? 600 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {drift ? `${s.fmtCountdown(s.remaining ?? 0)} left` : st.label}
+            </span>
+          </div>
+        </div>
+      </div>
+    </NavLink>
   )
 }
 
 export function AppShell() {
-  const tick = useFocus((s) => s.tick)
   const subscribe = useFocus((s) => s.subscribe)
-  const projects = useUsage((s) => s.projects)
   const loadAll = useUsage((s) => s.loadAll)
-  const live = useUsage((s) => s.live)
-  const connection = useUsage((s) => s.connection)
-  const prefs = usePrefs()
-  const demo = useDemo()
-
-  const [introOpen, setIntroOpen] = useState(!prefs.introDone)
+  const companion = usePrefs((s) => s.companion)
+  const s = useNube()
+  const loc = useLocation()
 
   useEffect(() => { void subscribe(); void loadAll() }, [subscribe, loadAll])
+  useEffect(() => { document.documentElement.setAttribute('data-theme', s.theme) }, [s.theme])
+  useEffect(() => { if (isTauri) void rescue.setCompanion(companion) }, [companion])
 
-  // companion window follows the pref
-  useEffect(() => { if (isTauri) void rescue.setCompanion(prefs.companion) }, [prefs.companion])
-
-  // intro replay (demo)
-  useEffect(() => { if (demo.introNonce > 0) setIntroOpen(true) }, [demo.introNonce])
-
-  const phase = demo.phase ?? phaseFromTick(tick)
-  const project = projects.find((p) => p.id === tick.activeProjectId) ?? [...projects].sort((a, b) => b.waterMl - a.waterMl)[0]
-  const hue = project?.colorHue ?? 268
-  const c = hueClay(hue)
-  const DEMO_LIFE: Record<Phase, number> = { working: 90, idle: 70, waiting: 86, draining: 62, critical: 36, fading: 13, faint: 0 }
-  const life = demo.phase ? DEMO_LIFE[phase] : lifeFromHealth(tick.cloudHealth)
-  const urgent = phase === 'draining' || phase === 'critical' || phase === 'fading'
-
-  const finishIntro = () => { prefs.set('introDone', true); setIntroOpen(false) }
-  const showDock = !live && !introOpen
+  const seg = loc.pathname.startsWith('/insights') ? 'insights'
+    : loc.pathname.startsWith('/settings') ? 'settings'
+    : loc.pathname.startsWith('/project') ? 'project'
+    : 'home'
+  const head = HEADERS[seg]
 
   return (
-    <div className="nn-ui" style={{ position: 'fixed', inset: 0, background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* custom titlebar (native traffic lights overlay on the left on macOS) */}
-      <div data-tauri-drag-region style={{ height: 42, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 15px 0 78px', background: 'rgba(255,255,255,.66)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(70,52,130,.08)' }}>
-        <div style={{ width: 130 }} />
-        <div className="nn-disp" style={{ fontWeight: 800, fontSize: 13.5, color: '#615a82', letterSpacing: '.02em', pointerEvents: 'none' }}>NubeNube</div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', width: 130 }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 11, color: connection?.connected ? SUB : '#b3adc8' }}>
-            <Dot color={connection?.connected ? '#54c489' : '#cfc8e0'} size={7} /> Claude Code
-          </span>
-        </div>
+    <div className="nn-app" data-theme={s.theme} style={{ ...themeVars(s.hue, s.theme, s.clay), position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--page)' }}>
+      {/* title bar — native traffic lights sit in the left inset (Overlay style) */}
+      <div data-tauri-drag-region style={{ position: 'relative', height: 40, flexShrink: 0, borderBottom: '1px solid var(--line-faint)', background: 'var(--surface-faint)' }}>
+        <span className="nn-disp" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--text)', fontWeight: 600, pointerEvents: 'none' }}>NubeNube</span>
       </div>
 
-      {/* body */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         {/* sidebar */}
-        <div style={{ width: 196, flexShrink: 0, display: 'flex', flexDirection: 'column', padding: 13, gap: 4, background: 'linear-gradient(180deg, rgba(255,255,255,.5), rgba(255,255,255,.16))', borderRight: '1px solid rgba(70,52,130,.07)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 8px 14px' }}>
-            <div style={{ width: 30, height: 30, marginTop: -2 }}><NubeCreature mood="content" hue={hue} size={30} scale={1.12} idle={false} /></div>
-            <span className="nn-disp" style={{ fontWeight: 800, fontSize: 16.5, color: INK, letterSpacing: '.01em' }}>NubeNube</span>
+        <div style={{ width: 210, flexShrink: 0, background: 'var(--surface-faint)', borderRight: '1px solid var(--line-faint)', display: 'flex', flexDirection: 'column', padding: 13 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {NAV.map((it) => <NavItem key={it.key} item={it} />)}
           </div>
-          {NAV.map((n) => <NavItem key={n.to} {...n} hue={hue} />)}
           <div style={{ flex: 1 }} />
-          <div style={{ borderRadius: 14, padding: 13, background: `linear-gradient(165deg, ${c.soft}, #fff)`, border: elev.border, boxShadow: shadow.sm }}>
-            <div style={{ fontWeight: 700, fontSize: 9.5, color: SUB, textTransform: 'uppercase', letterSpacing: '.06em' }}>home bloop</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 99, background: `radial-gradient(circle at 35% 30%, ${c.light}, ${c.deep})` }} />
-              <span style={{ fontWeight: 700, fontSize: 12.5, color: c.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{project?.name ?? 'no project yet'}</span>
-            </div>
-            <div style={{ marginTop: 9 }}><LifeBar life={life} base={BASE_LIFE} hue={hue} height={9} draining={urgent} /></div>
-          </div>
+          <HomeBloop />
         </div>
 
         {/* content */}
-        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-          <Outlet />
-          {introOpen && <IntroStory onDone={finishIntro} />}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', background: 'var(--page)' }}>
+          <div style={{ height: 60, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '0 24px', borderBottom: '1px solid var(--line-faint)' }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="nn-disp" style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.1 }}>{head.title}</div>
+              <div style={{ marginTop: 3, fontSize: 12.5, color: 'var(--faint)' }}>{head.subtitle}</div>
+            </div>
+            <div style={{ flex: 1 }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '22px 24px 26px' }}>
+            <Outlet />
+          </div>
         </div>
       </div>
-
-      {/* demo dock (sample-data mode) */}
-      {showDock && (
-        <div style={{ position: 'fixed', bottom: 15, left: '50%', transform: 'translateX(-50%)', zIndex: 400, display: 'flex', alignItems: 'center', gap: 11, background: 'rgba(44,37,68,.84)', backdropFilter: 'blur(16px)', borderRadius: 14, padding: '8px 13px', boxShadow: '0 20px 44px -18px rgba(36,28,66,.7)', border: '1px solid rgba(255,255,255,.08)' }}>
-          <span style={{ fontWeight: 700, fontSize: 9.5, color: 'rgba(255,255,255,.5)', letterSpacing: '.08em', textTransform: 'uppercase' }}>demo</span>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {DEMO_PHASES.map((p) => <DockBtn key={p} on={demo.phase === p} onClick={() => demo.setPhase(demo.phase === p ? null : p)}>{p}</DockBtn>)}
-          </div>
-          <span style={{ width: 1, height: 19, background: 'rgba(255,255,255,.18)' }} />
-          <DockBtn on={false} onClick={() => demo.replayIntro()}>↻ intro</DockBtn>
-        </div>
-      )}
     </div>
   )
 }

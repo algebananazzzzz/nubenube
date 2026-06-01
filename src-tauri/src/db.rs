@@ -21,15 +21,34 @@ use crate::dto::*;
 use crate::model::Line;
 use crate::water;
 
+/// Bump when the schema (tables/indexes/backfills below) changes so the one-shot
+/// migration re-runs. Stored in `PRAGMA user_version`.
+const SCHEMA_VERSION: i64 = 2;
+
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
     let _ = conn.pragma_update(None, "journal_mode", "WAL");
     let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+    // Four threads (connector, drift tick, events tail, commands) write to this
+    // DB. WAL serializes writers; the default 0ms busy timeout would make a
+    // colliding write fail with SQLITE_BUSY and get silently dropped (every
+    // write site discards its Result). Wait instead so writes aren't lost. Kept
+    // modest because the drift tick holds the runtime mutex while it writes.
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(1000));
     migrate(&conn)?;
     Ok(conn)
 }
 
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    // `open` is called on a hot path (every drift tick, every command, every
+    // ingest), so gate the whole CREATE/ALTER/UPDATE batch on user_version —
+    // run it once per DB instead of re-parsing/re-attempting it on every open.
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap_or(0);
+    if version >= SCHEMA_VERSION {
+        return Ok(());
+    }
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS messages_seen (
@@ -51,6 +70,10 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_msg_project ON messages_seen(project_id);
         CREATE INDEX IF NOT EXISTS idx_msg_day ON messages_seen(local_day);
+        -- resolve_project_by_cwd (per hook event) does WHERE cwd=? ORDER BY
+        -- ts_utc DESC; the composite seeks the cwd then reads the newest row
+        -- directly. Also accelerates the cwd GROUP BYs in the modal-cwd queries.
+        CREATE INDEX IF NOT EXISTS idx_msg_cwd ON messages_seen(cwd, ts_utc);
 
         CREATE TABLE IF NOT EXISTS file_cursors (
             path        TEXT PRIMARY KEY,
@@ -64,18 +87,22 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             value TEXT NOT NULL
         );
 
-        -- driven by the watcher / drift state machine (M2)
+        -- driven by the watcher / drift state machine (M2).
+        -- `claude_active_secs` = Claude working; `waiting_secs` = Claude idle,
+        -- waiting on you (attending, not distracted); `drift_secs` = on a
+        -- distraction while Claude waits; `idle_secs` = away.
         CREATE TABLE IF NOT EXISTS drift_daily (
             project_id          TEXT NOT NULL,
             local_day           TEXT NOT NULL,
             claude_active_secs  INTEGER NOT NULL DEFAULT 0,
             drift_secs          INTEGER NOT NULL DEFAULT 0,
             idle_secs           INTEGER NOT NULL DEFAULT 0,
+            waiting_secs        INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (project_id, local_day)
         );
         CREATE TABLE IF NOT EXISTS biome_state (
             project_id     TEXT PRIMARY KEY,
-            cloud_health   REAL NOT NULL DEFAULT 0.7,
+            cloud_health   REAL NOT NULL DEFAULT 100.0,
             last_reset_day TEXT NOT NULL DEFAULT '',
             mood           TEXT NOT NULL DEFAULT ''
         );
@@ -90,8 +117,42 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             secs      INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (local_day, app_name)
         );
+        -- per-(reset)day activity totals, keyed by reset-day:
+        --   active_secs    = states 1+2+3+4 (engaged or on a distraction)
+        --   distract_secs  = states 3+4 (on a distraction)
+        --   work_secs      = session-weighted Claude-working seconds (Σ running·dt)
+        --   monitored_secs = present-&-tracking wall-clock (everything but paused/away)
+        CREATE TABLE IF NOT EXISTS day_stats (
+            local_day      TEXT PRIMARY KEY,
+            active_secs    INTEGER NOT NULL DEFAULT 0,
+            distract_secs  INTEGER NOT NULL DEFAULT 0,
+            work_secs      INTEGER NOT NULL DEFAULT 0,
+            monitored_secs INTEGER NOT NULL DEFAULT 0
+        );
         "#,
-    )
+    )?;
+    // best-effort column adds for DBs created before a column existed
+    // (no-ops that error harmlessly if the column is already present).
+    let _ = conn.execute(
+        "ALTER TABLE drift_daily ADD COLUMN waiting_secs INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE day_stats ADD COLUMN work_secs INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE day_stats ADD COLUMN monitored_secs INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    // backfill rows that pre-date the monitored_secs column (they got DEFAULT 0
+    // but already had real distract_secs / active_secs, making distracted > monitored)
+    let _ = conn.execute(
+        "UPDATE day_stats SET monitored_secs = active_secs WHERE monitored_secs = 0 AND active_secs > 0",
+        [],
+    );
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------
@@ -115,17 +176,6 @@ pub fn set_meta(conn: &Connection, key: &str, value: &str) {
 fn bump_meta(conn: &Connection, key: &str, delta: u64) {
     let cur: u64 = get_meta(conn, key).and_then(|v| v.parse().ok()).unwrap_or(0);
     set_meta(conn, key, &(cur + delta).to_string());
-}
-
-/// Sum of "meaningful" tokens (input+output+cache_create; excludes cache_read
-/// context replay) for a project. Drives token-based health recovery.
-pub fn project_token_total(conn: &Connection, pid: &str) -> i64 {
-    conn.query_row(
-        "SELECT COALESCE(SUM(input+output+cache_create),0) FROM messages_seen WHERE project_id=?1",
-        [pid],
-        |r| r.get(0),
-    )
-    .unwrap_or(0)
 }
 
 /// Record a foreground app the watcher observed (auto-discovery backbone).
@@ -166,6 +216,57 @@ pub fn add_drift_by_app(conn: &Connection, day: &str, app_name: &str, secs: i64)
          ON CONFLICT(local_day,app_name) DO UPDATE SET secs = secs + ?3",
         params![day, app_name, secs],
     );
+}
+
+/// Add to today's activity totals (all deltas in seconds; an all-zero call is a
+/// no-op). See the `day_stats` schema for what each column means.
+pub fn add_day_stats(
+    conn: &Connection,
+    day: &str,
+    active_delta: i64,
+    distract_delta: i64,
+    work_delta: i64,
+    monitored_delta: i64,
+) {
+    if active_delta <= 0 && distract_delta <= 0 && work_delta <= 0 && monitored_delta <= 0 {
+        return;
+    }
+    let _ = conn.execute(
+        "INSERT INTO day_stats(local_day,active_secs,distract_secs,work_secs,monitored_secs)
+            VALUES(?1,?2,?3,?4,?5)
+         ON CONFLICT(local_day) DO UPDATE SET
+            active_secs    = active_secs + ?2,
+            distract_secs  = distract_secs + ?3,
+            work_secs      = work_secs + ?4,
+            monitored_secs = monitored_secs + ?5",
+        params![
+            day,
+            active_delta.max(0),
+            distract_delta.max(0),
+            work_delta.max(0),
+            monitored_delta.max(0)
+        ],
+    );
+}
+
+/// (active, distract, work, monitored) seconds for a reset-day; zeros if unseen.
+pub fn load_day_stats(conn: &Connection, day: &str) -> (i64, i64, i64, i64) {
+    conn.query_row(
+        "SELECT active_secs, distract_secs, work_secs, monitored_secs FROM day_stats WHERE local_day=?1",
+        [day],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        },
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .unwrap_or((0, 0, 0, 0))
 }
 
 /// First local_day to include for an insights range ("" = no lower bound).
@@ -342,13 +443,21 @@ fn process_line(conn: &Connection, line: &str, project_id: &str, naive: &mut u64
     let cwd = parsed.cwd.unwrap_or_default();
     let is_side = if parsed.is_sidechain.unwrap_or(false) { 1 } else { 0 };
 
+    // prepare_cached: this runs once per assistant line (thousands on an initial
+    // scan), so reuse one compiled statement across the whole ingest instead of
+    // re-parsing the SQL on every insert.
     let changed = conn
-        .execute(
+        .prepare_cached(
             "INSERT OR IGNORE INTO messages_seen
              (msg_id,req_id,project_id,cwd,ts_utc,local_day,local_month,local_hour,model,input,output,cache_create,cache_read,is_sidechain)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
-            params![msg_id, req_id, project_id, cwd, ts, day, month, hour, model, input, output, cc, cr, is_side],
         )
+        .and_then(|mut stmt| {
+            stmt.execute(params![
+                msg_id, req_id, project_id, cwd, ts, day, month, hour, model, input, output, cc, cr,
+                is_side
+            ])
+        })
         .unwrap_or(0);
     changed > 0
 }
@@ -379,6 +488,23 @@ fn modal_cwds(conn: &Connection) -> HashMap<String, String> {
     best.into_iter().map(|(k, v)| (k, v.0)).collect()
 }
 
+/// The single most common (modal) cwd for ONE project. Uses the project_id
+/// index instead of scanning every project's rows like `modal_cwds`, so callers
+/// that only need one project (project_name, project detail) don't pay for the
+/// whole table.
+fn modal_cwd_for(conn: &Connection, pid: &str) -> String {
+    conn.query_row(
+        "SELECT cwd FROM messages_seen WHERE project_id=?1 AND cwd<>''
+         GROUP BY cwd ORDER BY COUNT(*) DESC LIMIT 1",
+        [pid],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .unwrap_or_default()
+}
+
 fn name_from(cwd: &str, project_id: &str) -> String {
     if !cwd.is_empty() {
         if let Some(name) = Path::new(cwd).file_name() {
@@ -395,16 +521,15 @@ fn month_str() -> String {
     Local::now().format("%Y-%m").to_string()
 }
 
-/// project_id -> water mL, for a given equality predicate (local_day / local_month).
-fn water_map(conn: &Connection, col: &str, val: &str) -> HashMap<String, f64> {
-    let sql = format!(
+pub fn get_projects(conn: &Connection) -> Vec<Project> {
+    let cwds = modal_cwds(conn);
+    let mut projects = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
         "SELECT project_id, SUM(input),SUM(output),SUM(cache_create),SUM(cache_read)
-         FROM messages_seen WHERE {col}=?1 GROUP BY project_id"
-    );
-    let mut out = HashMap::new();
-    if let Ok(mut stmt) = conn.prepare(&sql) {
+         FROM messages_seen GROUP BY project_id",
+    ) {
         let rows = stmt
-            .query_map([val], |r| {
+            .query_map([], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, i64>(1)?,
@@ -417,128 +542,13 @@ fn water_map(conn: &Connection, col: &str, val: &str) -> HashMap<String, f64> {
             .flatten()
             .flatten();
         for (pid, i, o, cc, cr) in rows {
-            out.insert(pid, water::water_ml(i, o, cc, cr));
-        }
-    }
-    out
-}
-
-/// project_id -> trailing 7-day water (mL), oldest→newest, zero-filled.
-fn last7_water(conn: &Connection) -> HashMap<String, Vec<f64>> {
-    let days: Vec<String> = (0..7)
-        .rev()
-        .map(|i| (Local::now().date_naive() - chrono::Duration::days(i)).format("%Y-%m-%d").to_string())
-        .collect();
-    let mut per: HashMap<String, HashMap<String, f64>> = HashMap::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT project_id, local_day, SUM(input),SUM(output),SUM(cache_create),SUM(cache_read)
-         FROM messages_seen WHERE local_day >= ?1 AND local_day <> '' GROUP BY project_id, local_day",
-    ) {
-        let rows = stmt
-            .query_map([&days[0]], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, i64>(3)?,
-                    r.get::<_, i64>(4)?,
-                    r.get::<_, i64>(5)?,
-                ))
-            })
-            .into_iter()
-            .flatten()
-            .flatten();
-        for (pid, day, i, o, cc, cr) in rows {
-            per.entry(pid).or_default().insert(day, water::water_ml(i, o, cc, cr));
-        }
-    }
-    per.into_iter()
-        .map(|(pid, m)| (pid, days.iter().map(|d| *m.get(d).unwrap_or(&0.0)).collect()))
-        .collect()
-}
-
-fn biome_health(conn: &Connection) -> HashMap<String, f64> {
-    let mut out = HashMap::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT project_id, cloud_health FROM biome_state") {
-        let rows = stmt
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
-            .into_iter()
-            .flatten()
-            .flatten();
-        for (pid, h) in rows {
-            out.insert(pid, h);
-        }
-    }
-    out
-}
-
-/// project_id -> (claude_active_secs, drift_secs) for today.
-fn drift_today(conn: &Connection) -> HashMap<String, (i64, i64)> {
-    let mut out = HashMap::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT project_id, claude_active_secs, drift_secs FROM drift_daily WHERE local_day=?1",
-    ) {
-        let rows = stmt
-            .query_map([today_str()], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
-            })
-            .into_iter()
-            .flatten()
-            .flatten();
-        for (pid, a, d) in rows {
-            out.insert(pid, (a, d));
-        }
-    }
-    out
-}
-
-pub fn get_projects(conn: &Connection) -> Vec<Project> {
-    let cwds = modal_cwds(conn);
-    let today_w = water_map(conn, "local_day", &today_str());
-    let month_w = water_map(conn, "local_month", &month_str());
-    let health = biome_health(conn);
-    let drift = drift_today(conn);
-    let last7 = last7_water(conn);
-
-    let mut projects = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT project_id, SUM(input),SUM(output),SUM(cache_create),SUM(cache_read), COUNT(*), MIN(ts_utc), MAX(ts_utc)
-         FROM messages_seen GROUP BY project_id",
-    ) {
-        let rows = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, i64>(3)?,
-                    r.get::<_, i64>(4)?,
-                    r.get::<_, i64>(5)?,
-                    r.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                    r.get::<_, Option<String>>(7)?.unwrap_or_default(),
-                ))
-            })
-            .into_iter()
-            .flatten()
-            .flatten();
-        for (pid, i, o, cc, cr, count, first, last) in rows {
             let cwd = cwds.get(&pid).cloned().unwrap_or_default();
-            let (da, dd) = drift.get(&pid).copied().unwrap_or((0, 0));
             projects.push(Project {
                 name: name_from(&cwd, &pid),
                 root_path: cwd,
                 color_hue: water::hue_for(&pid),
-                first_seen_utc: first,
-                last_seen_utc: last,
                 tokens: TokenBreakdown { input: i, output: o, cache_create: cc, cache_read: cr },
                 water_ml: water::water_ml(i, o, cc, cr),
-                monthly_water_ml: *month_w.get(&pid).unwrap_or(&0.0),
-                today_water_ml: *today_w.get(&pid).unwrap_or(&0.0),
-                cloud_health: *health.get(&pid).unwrap_or(&0.7),
-                drift_secs_today: dd,
-                claude_active_secs_today: da,
-                msg_count: count,
-                last7: last7.get(&pid).cloned().unwrap_or_else(|| vec![0.0; 7]),
                 id: pid,
             });
         }
@@ -556,20 +566,14 @@ pub fn get_totals(conn: &Connection) -> Totals {
             |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?)),
         )
         .unwrap_or((0, 0, 0, 0, 0));
-    let today_w: f64 = water_map(conn, "local_day", &today_str()).values().sum();
-    let month_w: f64 = water_map(conn, "local_month", &month_str()).values().sum();
-    let drift: (i64, i64) = drift_today(conn).values().fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
     Totals {
         water_ml: water::water_ml(row.0, row.1, row.2, row.3),
         tokens: TokenBreakdown { input: row.0, output: row.1, cache_create: row.2, cache_read: row.3 },
         project_count: row.4,
-        today_water_ml: today_w,
-        month_water_ml: month_w,
-        claude_active_secs_today: drift.0,
-        drift_secs_today: drift.1,
     }
 }
 
+/// (predicate, optional bound param) over `messages_seen` for a range.
 fn range_predicate(range: &str) -> (String, Option<String>) {
     match range {
         "today" => ("local_day = ?1".into(), Some(today_str())),
@@ -582,169 +586,86 @@ fn range_predicate(range: &str) -> (String, Option<String>) {
     }
 }
 
+fn tokens_where(conn: &Connection, pred: &str, params: &[&str]) -> TokenBreakdown {
+    let sql = format!(
+        "SELECT COALESCE(SUM(input),0),COALESCE(SUM(output),0),COALESCE(SUM(cache_create),0),COALESCE(SUM(cache_read),0)
+         FROM messages_seen WHERE {pred}"
+    );
+    conn.query_row(&sql, params_from_iter(params.iter()), |r| {
+        Ok(TokenBreakdown {
+            input: r.get(0)?,
+            output: r.get(1)?,
+            cache_create: r.get(2)?,
+            cache_read: r.get(3)?,
+        })
+    })
+    .unwrap_or_default()
+}
+
 pub fn get_insights(conn: &Connection, range: &str) -> Insights {
+    // token composition for the range
     let (pred, param) = range_predicate(range);
-    let p_iter = || params_from_iter(param.iter());
+    let params: Vec<&str> = param.iter().map(|s| s.as_str()).collect();
+    let tokens = tokens_where(conn, &pred, &params);
 
-    // by day
-    let mut by_day = Vec::new();
-    let sql_day = format!(
-        "SELECT local_day, SUM(input),SUM(output),SUM(cache_create),SUM(cache_read)
-         FROM messages_seen WHERE {pred} AND local_day<>'' GROUP BY local_day ORDER BY local_day"
-    );
-    if let Ok(mut stmt) = conn.prepare(&sql_day) {
-        let rows = stmt
-            .query_map(p_iter(), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?))
-            })
-            .into_iter()
-            .flatten()
-            .flatten();
-        for (day, i, o, cc, cr) in rows {
-            by_day.push(DayPoint {
-                day,
-                water_ml: water::water_ml(i, o, cc, cr),
-                tokens: TokenBreakdown { input: i, output: o, cache_create: cc, cache_read: cr },
-                drift_secs: 0,
-                claude_active_secs: 0,
-            });
-        }
-    }
-
-    // by hour (0..23, fill gaps)
-    let mut hour_water = [0f64; 24];
-    let mut hour_count = [0i64; 24];
-    let sql_hour = format!(
-        "SELECT local_hour, SUM(input),SUM(output),SUM(cache_create),SUM(cache_read), COUNT(*)
-         FROM messages_seen WHERE {pred} GROUP BY local_hour"
-    );
-    if let Ok(mut stmt) = conn.prepare(&sql_hour) {
-        let rows = stmt
-            .query_map(p_iter(), |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?))
-            })
-            .into_iter()
-            .flatten()
-            .flatten();
-        for (h, i, o, cc, cr, c) in rows {
-            if (0..24).contains(&h) {
-                hour_water[h as usize] = water::water_ml(i, o, cc, cr);
-                hour_count[h as usize] = c;
-            }
-        }
-    }
-    let by_hour: Vec<HourPoint> = (0..24)
-        .map(|h| HourPoint { hour: h, water_ml: hour_water[h as usize], drift_secs: 0, count: hour_count[h as usize] })
-        .collect();
-
-    // top projects within range
-    let cwds = modal_cwds(conn);
-    let mut tops: Vec<TopProject> = Vec::new();
-    let sql_top = format!(
-        "SELECT project_id, SUM(input),SUM(output),SUM(cache_create),SUM(cache_read)
-         FROM messages_seen WHERE {pred} GROUP BY project_id"
-    );
-    if let Ok(mut stmt) = conn.prepare(&sql_top) {
-        let rows = stmt
-            .query_map(p_iter(), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?))
-            })
-            .into_iter()
-            .flatten()
-            .flatten();
-        for (pid, i, o, cc, cr) in rows {
-            let cwd = cwds.get(&pid).cloned().unwrap_or_default();
-            tops.push(TopProject {
-                name: name_from(&cwd, &pid),
-                water_ml: water::water_ml(i, o, cc, cr),
-                color_hue: water::hue_for(&pid),
-                id: pid,
-            });
-        }
-    }
-    tops.sort_by(|a, b| b.water_ml.partial_cmp(&a.water_ml).unwrap_or(std::cmp::Ordering::Equal));
-    tops.truncate(6);
-
-    let total_water: f64 = by_day.iter().map(|d| d.water_ml).sum();
-    let tokens = by_day.iter().fold(TokenBreakdown::default(), |a, d| TokenBreakdown {
-        input: a.input + d.tokens.input,
-        output: a.output + d.tokens.output,
-        cache_create: a.cache_create + d.tokens.cache_create,
-        cache_read: a.cache_read + d.tokens.cache_read,
-    });
+    // honest range-scoped focus aggregates from drift_daily
+    let start = range_start_day(range);
+    let (active, idle, drift) = conn
+        .query_row(
+            "SELECT COALESCE(SUM(claude_active_secs),0), COALESCE(SUM(waiting_secs),0), COALESCE(SUM(drift_secs),0)
+             FROM drift_daily WHERE local_day >= ?1",
+            [&start],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+        )
+        .unwrap_or((0, 0, 0));
 
     let distraction_breakdown = drift_app_breakdown(conn, range)
         .into_iter()
         .map(|(name, secs)| DistractionSlice { name, secs })
         .collect();
 
-    // honest range-scoped focus/drift from drift_daily (range_start_day added in 5.1)
-    let start = range_start_day(range);
-    let (active_total, drift_total) = conn
-        .query_row(
-            "SELECT COALESCE(SUM(claude_active_secs),0), COALESCE(SUM(drift_secs),0)
-             FROM drift_daily WHERE local_day >= ?1",
-            [&start],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
-        )
-        .unwrap_or((0, 0));
-
     Insights {
         range: range.to_string(),
-        water_ml: total_water,
         tokens,
-        by_day,
-        by_hour,
-        top_projects: tops,
-        claude_active_secs: active_total,
-        drift_secs: drift_total,
-        longest_focus_streak_secs: 0,
+        claude_active_secs: active,
+        claude_idle_secs: idle,
+        drift_secs: drift,
         distraction_breakdown,
     }
 }
 
-pub fn get_project_detail(conn: &Connection, id: &str) -> Option<ProjectDetail> {
-    let project = get_projects(conn).into_iter().find(|p| p.id == id)?;
-
-    // per-day focus/drift for this project (so detail focus stats are real, not 0)
-    let mut dmap: HashMap<String, (i64, i64)> = HashMap::new();
-    if let Ok(mut stmt) =
-        conn.prepare("SELECT local_day, claude_active_secs, drift_secs FROM drift_daily WHERE project_id=?1")
-    {
-        let rows = stmt
-            .query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))
-            .into_iter()
-            .flatten()
-            .flatten();
-        for (day, a, d) in rows {
-            dmap.insert(day, (a, d));
-        }
+pub fn get_project_detail(conn: &Connection, id: &str, range: &str) -> Option<ProjectDetail> {
+    let exists: i64 = conn
+        .query_row("SELECT COUNT(*) FROM messages_seen WHERE project_id=?1", [id], |r| r.get(0))
+        .unwrap_or(0);
+    if exists == 0 {
+        return None;
     }
 
-    let mut by_day = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT local_day, SUM(input),SUM(output),SUM(cache_create),SUM(cache_read)
-         FROM messages_seen WHERE project_id=?1 AND local_day<>'' GROUP BY local_day ORDER BY local_day",
-    ) {
-        let rows = stmt
-            .query_map([id], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?))
-            })
-            .into_iter()
-            .flatten()
-            .flatten();
-        for (day, i, o, cc, cr) in rows {
-            let (a, d) = dmap.get(&day).copied().unwrap_or((0, 0));
-            by_day.push(DayPoint {
-                day,
-                water_ml: water::water_ml(i, o, cc, cr),
-                tokens: TokenBreakdown { input: i, output: o, cache_create: cc, cache_read: cr },
-                drift_secs: d,
-                claude_active_secs: a,
-            });
+    // tokens for this project within the range (project_id=?1, range bound=?2)
+    let mut bind: Vec<String> = vec![id.to_string()];
+    let pred = match range {
+        "today" => { bind.push(today_str()); "project_id=?1 AND local_day = ?2".to_string() }
+        "week" => {
+            bind.push((Local::now() - Duration::days(6)).format("%Y-%m-%d").to_string());
+            "project_id=?1 AND local_day >= ?2".to_string()
         }
-    }
-    Some(ProjectDetail { project, by_day })
+        "month" => { bind.push(month_str()); "project_id=?1 AND local_month = ?2".to_string() }
+        _ => "project_id=?1".to_string(),
+    };
+    let refs: Vec<&str> = bind.iter().map(|s| s.as_str()).collect();
+    let tokens = tokens_where(conn, &pred, &refs);
+
+    let cwd = modal_cwd_for(conn, id);
+    Some(ProjectDetail {
+        water_ml: water::water_ml(tokens.input, tokens.output, tokens.cache_create, tokens.cache_read),
+        name: name_from(&cwd, id),
+        root_path: cwd,
+        color_hue: water::hue_for(id),
+        range: range.to_string(),
+        tokens,
+        id: id.to_string(),
+    })
 }
 
 pub fn connection_stats(conn: &Connection, roots: Vec<String>, hooks_installed: bool) -> ConnectionStatus {
@@ -754,23 +675,12 @@ pub fn connection_stats(conn: &Connection, roots: Vec<String>, hooks_installed: 
     let sessions_scanned: i64 = conn
         .query_row("SELECT COUNT(*) FROM file_cursors", [], |r| r.get(0))
         .unwrap_or(0);
-    let deduped: i64 = conn
-        .query_row("SELECT COUNT(*) FROM messages_seen", [], |r| r.get(0))
-        .unwrap_or(0);
-    let naive: f64 = get_meta(conn, "naive_assistant_lines")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0.0);
-    let ratio = if deduped > 0 { Some(naive / deduped as f64) } else { None };
 
     ConnectionStatus {
         connected: !roots.is_empty(),
-        log_roots: roots,
         projects_detected,
         sessions_scanned,
         hooks_installed,
-        last_scan_utc: get_meta(conn, "last_scan_utc"),
-        naive_dedup_ratio: ratio,
-        permissions: Permissions { screen_recording: false, automation: false },
     }
 }
 
@@ -780,12 +690,16 @@ pub fn connection_stats(conn: &Connection, roots: Vec<String>, hooks_installed: 
 
 /// Display name for a project id (from its modal cwd).
 pub fn project_name(conn: &Connection, pid: &str) -> String {
-    let cwds = modal_cwds(conn);
-    name_from(cwds.get(pid).map(|s| s.as_str()).unwrap_or(""), pid)
+    name_from(&modal_cwd_for(conn, pid), pid)
 }
 
-/// (cloud_health, last_reset_day) — defaults to (0.7, "") if unseen.
+/// (life, last_reset_day) on the new 0..130 scale — defaults to (BASELINE, "")
+/// if unseen. MIGRATION: pre-redesign rows stored `cloud_health` on the old
+/// 0..1 scale; any stored value `<= CAP/100` (1.3) is treated as old-scale and
+/// reset once to BASELINE so the meter starts fresh on the new scale.
 pub fn load_health(conn: &Connection, pid: &str) -> (f64, String) {
+    let baseline = crate::drift::BASELINE;
+    let old_scale_max = crate::drift::CAP / 100.0; // 1.3
     conn.query_row(
         "SELECT cloud_health, last_reset_day FROM biome_state WHERE project_id=?1",
         [pid],
@@ -794,7 +708,8 @@ pub fn load_health(conn: &Connection, pid: &str) -> (f64, String) {
     .optional()
     .ok()
     .flatten()
-    .unwrap_or((0.7, String::new()))
+    .map(|(h, d)| if h <= old_scale_max { (baseline, d) } else { (h, d) })
+    .unwrap_or((baseline, String::new()))
 }
 
 pub fn save_health(conn: &Connection, pid: &str, health: f64, day: &str) {
@@ -805,21 +720,17 @@ pub fn save_health(conn: &Connection, pid: &str, health: f64, day: &str) {
     );
 }
 
-pub fn reset_all_health(conn: &Connection, baseline: f64, day: &str) {
+/// Add to a project's daily drift totals. All four deltas in seconds; zeros are
+/// no-ops on their column.
+pub fn add_drift(conn: &Connection, pid: &str, day: &str, active: i64, drift: i64, idle: i64, waiting: i64) {
     let _ = conn.execute(
-        "UPDATE biome_state SET cloud_health=?1, last_reset_day=?2",
-        params![baseline, day],
-    );
-}
-
-pub fn add_drift(conn: &Connection, pid: &str, day: &str, active: i64, drift: i64, idle: i64) {
-    let _ = conn.execute(
-        "INSERT INTO drift_daily(project_id,local_day,claude_active_secs,drift_secs,idle_secs) VALUES(?1,?2,?3,?4,?5)
+        "INSERT INTO drift_daily(project_id,local_day,claude_active_secs,drift_secs,idle_secs,waiting_secs) VALUES(?1,?2,?3,?4,?5,?6)
          ON CONFLICT(project_id,local_day) DO UPDATE SET
             claude_active_secs = claude_active_secs + ?3,
             drift_secs = drift_secs + ?4,
-            idle_secs = idle_secs + ?5",
-        params![pid, day, active, drift, idle],
+            idle_secs = idle_secs + ?5,
+            waiting_secs = waiting_secs + ?6",
+        params![pid, day, active, drift, idle, waiting],
     );
 }
 

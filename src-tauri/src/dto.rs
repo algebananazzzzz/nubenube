@@ -1,5 +1,6 @@
 //! Output structs returned to the frontend. `rename_all = "camelCase"` makes
 //! them match src/types.ts exactly (cacheCreate, waterMl, projectCount, ...).
+//! Trimmed to only what the Helios redesign renders.
 
 use serde::Serialize;
 
@@ -19,17 +20,8 @@ pub struct Project {
     pub name: String,
     pub root_path: String,
     pub color_hue: i64,
-    pub first_seen_utc: String,
-    pub last_seen_utc: String,
-    pub tokens: TokenBreakdown,
-    pub water_ml: f64,
-    pub monthly_water_ml: f64,
-    pub today_water_ml: f64,
-    pub cloud_health: f64,
-    pub drift_secs_today: i64,
-    pub claude_active_secs_today: i64,
-    pub msg_count: i64,
-    pub last7: Vec<f64>,
+    pub tokens: TokenBreakdown, // lifetime, deduped
+    pub water_ml: f64,          // lifetime, derived from tokens
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -38,38 +30,6 @@ pub struct Totals {
     pub water_ml: f64,
     pub tokens: TokenBreakdown,
     pub project_count: i64,
-    pub today_water_ml: f64,
-    pub month_water_ml: f64,
-    pub claude_active_secs_today: i64,
-    pub drift_secs_today: i64,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct DayPoint {
-    pub day: String,
-    pub water_ml: f64,
-    pub tokens: TokenBreakdown,
-    pub drift_secs: i64,
-    pub claude_active_secs: i64,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct HourPoint {
-    pub hour: i64,
-    pub water_ml: f64,
-    pub drift_secs: i64,
-    pub count: i64,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TopProject {
-    pub id: String,
-    pub name: String,
-    pub water_ml: f64,
-    pub color_hue: i64,
 }
 
 #[derive(Serialize, Clone)]
@@ -83,42 +43,32 @@ pub struct DistractionSlice {
 #[serde(rename_all = "camelCase")]
 pub struct Insights {
     pub range: String,
-    pub water_ml: f64,
-    pub tokens: TokenBreakdown,
-    pub by_day: Vec<DayPoint>,
-    pub by_hour: Vec<HourPoint>,
-    pub top_projects: Vec<TopProject>,
-    pub claude_active_secs: i64,
-    pub drift_secs: i64,
-    pub longest_focus_streak_secs: i64,
+    pub tokens: TokenBreakdown, // token composition for the range
+    pub claude_active_secs: i64, // Claude working
+    pub claude_idle_secs: i64,   // Claude idle, waiting on you
+    pub drift_secs: i64,         // time on distractions
     pub distraction_breakdown: Vec<DistractionSlice>,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Permissions {
-    pub screen_recording: bool,
-    pub automation: bool,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionStatus {
     pub connected: bool,
-    pub log_roots: Vec<String>,
     pub projects_detected: i64,
     pub sessions_scanned: i64,
     pub hooks_installed: bool,
-    pub last_scan_utc: Option<String>,
-    pub naive_dedup_ratio: Option<f64>,
-    pub permissions: Permissions,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDetail {
-    pub project: Project,
-    pub by_day: Vec<DayPoint>,
+    pub id: String,
+    pub name: String,
+    pub root_path: String,
+    pub color_hue: i64,
+    pub range: String,
+    pub tokens: TokenBreakdown,
+    pub water_ml: f64,
 }
 
 #[derive(Serialize, Clone)]
@@ -132,17 +82,28 @@ pub struct KnownApp {
 #[serde(rename_all = "camelCase")]
 pub struct FocusTickDto {
     pub ts: String,
-    pub app_id: String,
-    pub app_name: String,
-    pub app_class: String,
-    pub title: Option<String>,
-    pub idle_secs: i64,
     pub state: String,
-    pub active_project_id: Option<String>,
-    pub active_project_name: Option<String>,
+    pub app_name: String,
+    /// `life` on the 0..cap (130) scale (field kept named `cloudHealth`).
     pub cloud_health: f64,
-    pub seconds_since_claude_finished: Option<i64>,
+    /// Full / "par" life and the daily reset level (100).
+    pub baseline: f64,
+    /// Hard ceiling on life = baseline + banked bonus (130).
+    pub cap: f64,
     pub waiting_sessions: i64,
     pub running_sessions: i64,
     pub seconds_to_death: Option<i64>,
+    /// Today's (reset-day) activity totals, in seconds. `active` = states 1+2+3+4;
+    /// `distract` = states 3+4 (`active - distract` = focused, states 1+2);
+    /// `work` = session-weighted Claude-working time (Σ running·dt, ticks faster
+    /// with more windows); `monitored` = present-&-tracking wall-clock.
+    pub active_secs_today: i64,
+    pub distract_secs_today: i64,
+    pub work_secs_today: i64,
+    pub monitored_secs_today: i64,
+    /// True while the meter is frozen (paused or away/idle) — lets the UI know
+    /// when NOT to tick its live timers locally.
+    pub frozen: bool,
+    /// Active project's hue (drives the accent + creature tint), 0..360.
+    pub color_hue: i64,
 }

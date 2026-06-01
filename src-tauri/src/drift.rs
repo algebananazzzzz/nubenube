@@ -1,19 +1,23 @@
-//! Post-Stop drift state machine + cloudHealth — per-session and additive.
+//! Post-Stop drift state machine + life meter — per-session and additive.
 //!
-//! Two-force model: WATER (tokens) grows the Nube's size (connector); FOCUS-vs-
-//! DRIFT drives HEALTH (here), which resets daily. Idle (away) FREEZES health.
+//! ONE time-based meter, `life` (stored in the `health`/`cloud_health` field on
+//! the 0..130 scale). Its single meaning is **responsiveness to Claude**: when
+//! Claude finishes and waits on you, are you there to continue, or did you drift?
 //!
-//! Drift accrues ONLY while a Claude session is stopped-and-waiting for you AND
-//! you're on a distraction app, and it STACKS across concurrently-waiting
-//! sessions — each attributed to that session's own project. So 1 waiting
-//! session = 1×, 4 waiting = 4×.
+//! Every tick over real elapsed `dt`:
+//!   life += (HEAL·running − DRAIN·waiting)·(dt/60)   then clamp to [0, CAP]
+//! where `R = BASELINE / time_to_death_min`, `HEAL = ratio·R` per running window
+//! (applies whenever running>0, regardless of foreground), and `DRAIN = R` per
+//! waiting-past-grace session (applies ONLY on a distraction foreground). HEAL
+//! and DRAIN net in the same tick. Idle/paused FREEZES the meter and every
+//! waiting clock. Daily reset (honoring resetTimeLocal) sets life = BASELINE.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::Local;
+use chrono::{Local, NaiveTime, Timelike};
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter};
 
@@ -21,10 +25,19 @@ use crate::dto::FocusTickDto;
 use crate::watcher::{self, AppClass};
 use crate::{db, notify, settings};
 
-const RESET_BASELINE: f64 = 0.7;
-/// A session waiting longer than this (e.g. closed terminal, never re-engaged)
-/// is treated as abandoned and stops counting toward drift.
-const ABANDON_SECS: u64 = 1800;
+/// Full / "par" life — the daily reset level and the 100% baseline marker.
+pub const BASELINE: f64 = 100.0;
+/// Banked over-charge headroom above baseline, as a fraction of baseline.
+pub const BONUS_RATIO: f64 = 0.3;
+/// Hard ceiling on life: baseline + banked bonus.
+pub const CAP: f64 = BASELINE * (1.0 + BONUS_RATIO); // 130.0
+/// Staleness fallback for a session that never got a `SessionEnd` (its clock is
+/// frozen while you're idle/away, so this is active-waiting time, not wall-clock).
+/// Graceful exits — Ctrl+D (`prompt_input_exit`), Ctrl+C (`other`) — DO fire
+/// `SessionEnd` → `handle_end` removes immediately; this only catches force-kills
+/// (SIGKILL) where no hook runs. 10 min: long enough not to drop a real wait,
+/// short enough that a killed terminal stops being a phantom "waiting"/"working".
+const ABANDON_SECS: u64 = 600;
 
 /// One Claude session, tracked across its lifecycle.
 #[derive(Clone, Copy, PartialEq)]
@@ -47,19 +60,30 @@ pub struct DriftRuntime {
     state: String,
     project_id: Option<String>,
     project_name: String,
+    /// `life` on the 0..CAP (130) scale. Field kept named `health` to limit churn.
     health: f64,
     last_reset_day: String,
     last_tick: Instant,
     sessions: HashMap<String, Session>, // session_id → lifecycle state (all live sessions, any phase)
-    last_token_total: i64,
     last_app_name: String,
+    // today's activity totals (reset-day scoped, persisted in day_stats):
+    // `active_secs` = unpaused & not-idle wall-clock; `distract_secs` = the
+    // subset spent on a distraction app. Emitted live so Home counts up.
+    stats_day: String,
+    active_secs: i64,
+    distract_secs: i64,
+    work_secs: i64,      // session-weighted Claude-working seconds (Σ running·dt)
+    monitored_secs: i64, // present-&-tracking wall-clock (everything but paused/away)
+    // Cached settings keyed by the file's mtime, so the 2s tick re-reads+parses
+    // settings.json only when it actually changed (writes are atomic).
+    settings_cache: Option<(std::time::SystemTime, settings::Settings)>,
 }
 
 /// Summarize waiting sessions given each one's (project_id, elapsed_secs):
 /// returns (total past-grace count, per-project past-grace counts, longest
 /// elapsed among non-abandoned sessions). Pure -> unit-testable.
 fn waiting_load(
-    sessions: &[(Option<String>, u64)],
+    sessions: &[(Option<&str>, u64)],
     grace: u64,
 ) -> (i64, HashMap<String, i64>, Option<u64>) {
     let mut total = 0i64;
@@ -72,45 +96,108 @@ fn waiting_load(
         longest = Some(longest.map_or(*elapsed, |l| l.max(*elapsed)));
         if *elapsed >= grace {
             total += 1;
-            let key = pid.clone().unwrap_or_else(|| "_".to_string());
+            let key = pid.unwrap_or("_").to_string();
             *per_project.entry(key).or_insert(0) += 1;
         }
     }
     (total, per_project, longest)
 }
 
-/// Time until health reaches 0 at the current decay rate (minutes→seconds).
-/// None when nothing is waiting (the meter holds, so there is no countdown).
-pub fn seconds_to_death(health: f64, waiting_count: i64, decay_per_min: f64) -> Option<i64> {
-    if waiting_count > 0 && decay_per_min > 0.0 {
-        Some(((health / (decay_per_min * waiting_count as f64)) * 60.0).round() as i64)
+/// Net life rate in %-points per minute (the two forces of §3, netted):
+///   `ratio·R·running − (on_distraction ? R·waiting : 0)`,  `R = baseline / T`.
+/// HEAL (running) applies whenever running>0 regardless of foreground; DRAIN
+/// (waiting) applies only on a distraction foreground. Pure → unit-testable.
+pub fn life_rate(
+    on_distraction: bool,
+    waiting: i64,
+    running: i64,
+    baseline: f64,
+    time_to_death_min: f64,
+    ratio: f64,
+) -> f64 {
+    let r = baseline / time_to_death_min;
+    let heal = ratio * r * running as f64;
+    let drain = if on_distraction { r * waiting as f64 } else { 0.0 };
+    heal - drain
+}
+
+/// Integrate `rate` (%-points/min) over `dt` seconds onto `life`, clamped to
+/// [0, CAP]. When `frozen` (idle/paused) life does not change. Pure.
+pub fn apply_life(life: f64, dt: f64, rate: f64, frozen: bool) -> f64 {
+    if frozen {
+        life
+    } else {
+        (life + rate * dt / 60.0).clamp(0.0, CAP)
+    }
+}
+
+/// Honest net-rate countdown: seconds until life hits 0 at the current net rate.
+/// Some only while net-draining (`rate < 0`); None when holding or healing. Pure.
+/// Because `life` includes any banked bonus (up to CAP=130), a drifting session
+/// that earned bonus counts down from the higher number — the bonus buys time.
+pub fn countdown_secs(life: f64, rate: f64) -> Option<i64> {
+    if rate < 0.0 {
+        Some(((life / -rate) * 60.0).round() as i64)
     } else {
         None
     }
 }
 
-/// The whole-life model in one place (pure → unit-testable).
-/// Decay applies only while drifting (distraction + ≥1 waiting session);
-/// recovery is token-driven and ~10× gentler; otherwise health holds.
-/// Pure health update. Precondition: `drifting` implies `waiting_count > 0`
-/// (decay is proportional to waiting_count, so a 0 count is a no-op anyway).
-pub fn apply_focus(
-    health: f64,
-    dt: f64,
-    drifting: bool,
-    waiting_count: i64,
-    new_tokens: i64,
-    decay_per_min: f64,
-    recovery_per_token: f64,
-) -> f64 {
-    let mut h = health;
-    if drifting {
-        h -= decay_per_min * waiting_count as f64 * (dt / 60.0);
+/// The one canonical overlay/Home state, from the live signals. Exactly the
+/// user's mental model, by priority:
+///   - **paused** — tracking off (manual).
+///   - **idle** — away from the keyboard (frozen), OR nothing happening at all
+///     (no session, neutral foreground).
+///   - on a distraction foreground →
+///       - **drifting** — a turn is waiting past grace (Claude blocked on you
+///         while you're on a distraction → countdown).
+///       - **chillin** — no turn waiting (on a distraction, but nothing's blocked).
+///   - **waiting** — not on a distraction, a turn is waiting (your turn).
+///   - **vibing** — not on a distraction, Claude is working (running > 0).
+/// `focused`(Home 1+2) = vibing+waiting; `distracted`(3+4) = drifting+chillin.
+/// Pure → unit-testable.
+pub fn focus_state(
+    paused: bool,
+    away: bool,
+    on_distraction: bool,
+    waiting_total: i64,
+    waiting_past_grace: i64,
+    running: i64,
+) -> &'static str {
+    if paused {
+        "paused"
+    } else if away {
+        "idle"
+    } else if on_distraction {
+        if waiting_past_grace > 0 {
+            "drifting"
+        } else {
+            "chillin"
+        }
+    } else if waiting_total > 0 {
+        "waiting"
+    } else if running > 0 {
+        "vibing"
+    } else {
+        "idle"
     }
-    if new_tokens > 0 {
-        h += recovery_per_token * new_tokens as f64;
+}
+
+/// The current "reset day" id (`%Y-%m-%d`) given `now` and the configured local
+/// reset time `HH:MM`. The day boundary is the configured time, not calendar
+/// midnight: before the reset time the slate still belongs to yesterday. Pure.
+fn reset_day_id(now: &chrono::DateTime<Local>, reset_time_local: &str) -> String {
+    let reset = NaiveTime::parse_from_str(reset_time_local, "%H:%M")
+        .unwrap_or_else(|_| NaiveTime::from_hms_opt(5, 0, 0).unwrap());
+    let now_mins = now.hour() * 60 + now.minute();
+    let reset_mins = reset.hour() * 60 + reset.minute();
+    if now_mins >= reset_mins {
+        now.format("%Y-%m-%d").to_string()
+    } else {
+        (now.date_naive() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string()
     }
-    h.clamp(0.0, 1.0)
 }
 
 impl DriftRuntime {
@@ -118,15 +205,20 @@ impl DriftRuntime {
         let mut rt = DriftRuntime {
             db_path,
             config_dir,
-            state: "growing".to_string(),
+            state: "idle".to_string(),
             project_id: None,
             project_name: String::new(),
-            health: RESET_BASELINE,
+            health: BASELINE,
             last_reset_day: String::new(),
             last_tick: Instant::now(),
             sessions: HashMap::new(),
-            last_token_total: 0,
             last_app_name: String::new(),
+            stats_day: String::new(),
+            active_secs: 0,
+            distract_secs: 0,
+            work_secs: 0,
+            monitored_secs: 0,
+            settings_cache: None,
         };
         if let Ok(conn) = db::open(&rt.db_path) {
             if let Some(pid) = db::most_recent_project(&conn) {
@@ -145,7 +237,6 @@ impl DriftRuntime {
         self.project_name = db::project_name(conn, pid);
         self.health = h;
         self.last_reset_day = d;
-        self.last_token_total = db::project_token_total(conn, pid);
     }
 
     fn session_key(session_id: &str) -> String {
@@ -191,9 +282,40 @@ impl DriftRuntime {
     pub fn handle_stop(&mut self, session_id: &str, cwd: &str) {
         self.upsert(session_id, cwd, SessionPhase::Waiting);
     }
+    /// Mid-turn block — PreToolUse[AskUserQuestion] (a "userchoose" prompt) or
+    /// Notification (permission needed / input idle): Claude is parked on you,
+    /// exactly like a finished turn, so it's Waiting (stops healing, becomes
+    /// drift-eligible). Back to Running on the next `reengage` (PostToolUse) once
+    /// you've answered/granted. If the session is ALREADY Waiting (e.g. an
+    /// idle-input Notification 60s into an existing wait), leave its clock alone
+    /// so grace and the countdown aren't reset.
+    pub fn handle_wait(&mut self, session_id: &str, cwd: &str) {
+        let key = Self::session_key(session_id);
+        if matches!(self.sessions.get(&key), Some(s) if s.phase == SessionPhase::Waiting) {
+            return;
+        }
+        self.upsert(session_id, cwd, SessionPhase::Waiting);
+    }
     /// SessionEnd hook: session removed.
     pub fn handle_end(&mut self, session_id: &str) {
         self.sessions.remove(&Self::session_key(session_id));
+    }
+
+    /// Load settings, reusing the cached copy while settings.json is unchanged.
+    /// `stat` is cheap; the read + JSON parse it replaces is not, and this runs
+    /// every 2s forever.
+    fn load_settings(&mut self) -> settings::Settings {
+        let mtime = settings::modified(&self.config_dir);
+        if let (Some(mt), Some((cached_mt, cached))) = (mtime, &self.settings_cache) {
+            if mt == *cached_mt {
+                return cached.clone();
+            }
+        }
+        let s = settings::load(&self.config_dir);
+        if let Some(mt) = mtime {
+            self.settings_cache = Some((mt, s.clone()));
+        }
+        s
     }
 
     pub fn tick(&mut self, app: &AppHandle) {
@@ -201,45 +323,55 @@ impl DriftRuntime {
         let dt = (now - self.last_tick).as_secs_f64();
         self.last_tick = now;
 
-        let s = settings::load(&self.config_dir);
+        let s = self.load_settings();
         let snap = watcher::snapshot();
         let class = watcher::classify(&snap.app_name, &s);
 
+        // One short-lived connection for the entire tick (WAL keeps the
+        // connector/command threads safe). Previously the tick opened the DB up
+        // to 3× per 2s, each open re-running the migration batch.
+        let conn = db::open(&self.db_path).ok();
+
         if !snap.app_name.is_empty() && snap.app_name != self.last_app_name {
             self.last_app_name = snap.app_name.clone();
-            if let Ok(c) = db::open(&self.db_path) {
-                db::record_known_app(&c, &snap.app_name);
+            if let Some(c) = &conn {
+                db::record_known_app(c, &snap.app_name);
             }
         }
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        let now_local = Local::now();
+        let today = now_local.format("%Y-%m-%d").to_string();
 
         if self.project_id.is_none() {
-            if let Ok(conn) = db::open(&self.db_path) {
-                if let Some(pid) = db::most_recent_project(&conn) {
-                    self.adopt_project(&conn, &pid);
+            if let Some(c) = &conn {
+                if let Some(pid) = db::most_recent_project(c) {
+                    self.adopt_project(c, &pid);
                 }
             }
         }
 
-        if self.last_reset_day != today {
-            self.health = RESET_BASELINE;
-            self.last_reset_day = today.clone();
+        // Daily reset honors `resetTimeLocal` (NOT calendar midnight): on the
+        // first tick at/after the configured local time on a new reset-day, life
+        // snaps back to BASELINE — clearing both banked bonus and any deficit.
+        let reset_day = reset_day_id(&now_local, &s.reset_time_local);
+        if self.last_reset_day != reset_day {
+            self.health = BASELINE;
+            self.last_reset_day = reset_day.clone();
         }
 
         // evict any session that has sat in its current phase past the abandon
         // timeout (covers Waiting drift AND Running/Idle whose SessionEnd was missed)
         self.sessions.retain(|_, s| (now - s.since).as_secs() <= ABANDON_SECS);
         let grace = s.sensitivity.grace_secs.max(0) as u64;
-        let waiting_list: Vec<(Option<String>, u64)> = self
+        let waiting_list: Vec<(Option<&str>, u64)> = self
             .sessions
             .values()
             .filter(|s| s.phase == SessionPhase::Waiting)
-            .map(|s| (s.project_id.clone(), (now - s.since).as_secs()))
+            .map(|s| (s.project_id.as_deref(), (now - s.since).as_secs()))
             .collect();
-        let (waiting_count, per_project, longest) = waiting_load(&waiting_list, grace);
-        // waiting_count = sessions PAST grace (drives decay); waiting_total = ALL
-        // waiting sessions — shown immediately so the buddy reacts the instant
-        // Claude finishes (the countdown displays during grace, just paused).
+        let (waiting_count, per_project, _longest) = waiting_load(&waiting_list, grace);
+        // waiting_count = sessions PAST grace (drives DRAIN); waiting_total = ALL
+        // waiting sessions — surfaced immediately so the buddy reacts the instant
+        // Claude finishes (the "waiting" state shows during grace too).
         let waiting_total = waiting_list.len() as i64;
         let running_count = self
             .sessions
@@ -249,81 +381,127 @@ impl DriftRuntime {
 
         let paused = settings::is_paused(&s);
         let idle = snap.idle_secs > s.sensitivity.idle_threshold_secs as u64;
+        let frozen = paused || idle;
         let dts = dt.round() as i64;
-        let conn = db::open(&self.db_path).ok();
 
-        if paused || idle {
-            // freeze every waiting clock so a break/away doesn't age the wait
-            let frozen = Duration::from_secs_f64(dt);
+        // The two forces (§3). DRAIN counts only on a distraction foreground;
+        // HEAL counts whenever a window is running, regardless of foreground.
+        // `life_rate` encodes exactly this gating, so we pass the raw counts.
+        let on_distraction = matches!(class, AppClass::Distraction);
+        let rate = life_rate(
+            on_distraction,
+            waiting_count,
+            running_count,
+            BASELINE,
+            s.sensitivity.time_to_death_min,
+            s.sensitivity.heal_drain_ratio,
+        );
+        // drifting = on a distraction with a turn waiting past grace. The user's
+        // model is positional ("Claude is waiting and I'm on a distraction"), not
+        // net-rate-gated — if running windows happen to out-heal the bleed this
+        // instant the countdown simply won't show (countdown_secs → None), but the
+        // state is still "drifting".
+        let drifting = !frozen && on_distraction && waiting_count > 0;
+
+        if frozen {
+            // freeze every waiting clock so a break/away doesn't age the wait,
+            // and hold life unchanged (apply_life is a no-op when frozen).
+            let frozen_dur = Duration::from_secs_f64(dt);
             for session in self.sessions.values_mut() {
                 if session.phase == SessionPhase::Waiting {
-                    session.since += frozen;
+                    session.since += frozen_dur;
                 }
             }
-            self.state = (if paused { "paused" } else { "idle" }).to_string();
-            // advance the token cursor during idle/paused so returning doesn't dump a
-            // huge recovery delta (idle freezes health — those tokens don't recover it)
-            if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
-                self.last_token_total = db::project_token_total(c, &pid);
-            }
-            if idle && !paused {
-                if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
-                    db::add_drift(c, &pid, &today, 0, 0, dts);
-                }
-            }
-        } else {
-            // token-driven recovery (works whenever Claude is consuming for you)
-            let mut new_tokens = 0i64;
-            if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
-                let cur = db::project_token_total(c, &pid);
-                new_tokens = (cur - self.last_token_total).max(0);
-                self.last_token_total = cur;
-            }
-            let drifting = matches!(class, AppClass::Distraction) && waiting_count > 0;
+        }
 
-            self.health = apply_focus(
-                self.health,
-                dt,
-                drifting,
-                waiting_count,
-                new_tokens,
-                s.sensitivity.decay_per_min,
-                s.sensitivity.recovery_per_token,
-            );
+        self.health = apply_life(self.health, dt, rate, frozen);
 
-            if drifting {
-                self.state = "drifting".to_string();
-                if let Some(c) = &conn {
-                    for (key, kx) in &per_project {
-                        let drift = dts * *kx;
-                        let pid = if key == "_" { self.project_id.clone() } else { Some(key.clone()) };
-                        if let Some(pid) = pid {
-                            db::add_drift(c, &pid, &today, 0, drift, 0);
-                        }
+        // The one canonical state (see `focus_state`). `idle` covers both
+        // away-from-keyboard (frozen) and genuine nothing-happening.
+        self.state =
+            focus_state(paused, idle, on_distraction, waiting_total, waiting_count, running_count)
+                .to_string();
+
+        // Per-project / per-app drift attribution for Insights — no longer drives
+        // life, but still records honest distraction, active-work, and idle-wait
+        // seconds (the latter is the "Claude idle" metric).
+        if let Some(c) = &conn {
+            if frozen {
+                if idle && !paused {
+                    if let Some(pid) = self.project_id.as_deref() {
+                        db::add_drift(c, pid, &today, 0, 0, dts, 0);
                     }
-                    // per-app distraction time (Phase 5 reads this) — guarded so it
-                    // is a no-op until the table exists.
-                    db::add_drift_by_app(c, &today, &snap.app_name, dts);
+                }
+            } else if drifting {
+                for (key, kx) in &per_project {
+                    let drift = dts * *kx;
+                    let pid = if key == "_" { self.project_id.as_deref() } else { Some(key.as_str()) };
+                    if let Some(pid) = pid {
+                        db::add_drift(c, pid, &today, 0, drift, 0, 0);
+                    }
+                }
+                // per-app distraction time (Insights reads this) — guarded so it
+                // is a no-op until the table exists.
+                db::add_drift_by_app(c, &today, &snap.app_name, dts);
+            } else if running_count > 0 {
+                if let Some(pid) = self.project_id.as_deref() {
+                    db::add_drift(c, pid, &today, dts, 0, 0, 0); // honest "active" secs
                 }
             } else if waiting_total > 0 {
-                self.state = "waiting".to_string(); // a session is waiting (incl. grace) — react now
-            } else if new_tokens > 0 {
-                self.state = "growing".to_string(); // Claude actively working for you
-                if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
-                    db::add_drift(c, &pid, &today, dts, 0, 0); // honest "active" secs
+                if let Some(pid) = self.project_id.as_deref() {
+                    db::add_drift(c, pid, &today, 0, 0, 0, dts); // Claude idle, waiting on you
                 }
-            } else {
-                self.state = "idle".to_string(); // nothing happening — hold
             }
         }
 
-        self.health = self.health.clamp(0.0, 1.0);
-        if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
-            db::save_health(c, &pid, self.health, &today);
+        // today's activity totals (Home "time with Claude" + "distracted"), scoped
+        // to the reset-day so they roll over with life. See the active/distract
+        // deltas below for the exact definitions. Persisted so a restart doesn't
+        // zero them.
+        if self.stats_day != reset_day {
+            let (a, d, w, m) =
+                conn.as_ref().map_or((0, 0, 0, 0), |c| db::load_day_stats(c, &reset_day));
+            self.active_secs = a;
+            self.distract_secs = d;
+            self.work_secs = w;
+            self.monitored_secs = m;
+            self.stats_day = reset_day.clone();
+        }
+        // `active` counts only ENGAGED time — a Claude session running/waiting, or
+        // time on a distraction — so genuinely-idle minutes (no session, neutral
+        // foreground) don't inflate it. `focused = active − distract` is then
+        // exactly states 1+2 (vibing + waiting); `distract` is states 3+4.
+        let engaged = running_count > 0 || waiting_total > 0;
+        let active_delta = if !frozen && (on_distraction || engaged) { dts } else { 0 };
+        let distract_delta = if !frozen && on_distraction { dts } else { 0 };
+        // `work` is session-weighted (Σ running·dt) so it ticks faster with more
+        // running windows — the "additional factor" for parallel Claude sessions.
+        // `monitored` is all present-&-tracking time (everything but paused/away).
+        let work_delta = if !frozen { dts * running_count } else { 0 };
+        let monitored_delta = if !frozen { dts } else { 0 };
+        if active_delta > 0 || distract_delta > 0 || work_delta > 0 || monitored_delta > 0 {
+            self.active_secs += active_delta;
+            self.distract_secs += distract_delta;
+            self.work_secs += work_delta;
+            self.monitored_secs += monitored_delta;
+            if let Some(c) = &conn {
+                db::add_day_stats(
+                    c,
+                    &reset_day,
+                    active_delta,
+                    distract_delta,
+                    work_delta,
+                    monitored_delta,
+                );
+            }
         }
 
-        // gentle drift-moment: once per session, after grace + sustained drift
-        let seconds_to_death = seconds_to_death(self.health, waiting_total, s.sensitivity.decay_per_min);
+        if let (Some(c), Some(pid)) = (&conn, self.project_id.as_deref()) {
+            db::save_health(c, pid, self.health, &reset_day);
+        }
+
+        // Honest net-rate countdown: Some only while net-draining (drifting).
+        let seconds_to_death = countdown_secs(self.health, rate);
         if self.state == "drifting" {
             let mut fire = false;
             for w in self.sessions.values_mut().filter(|s| s.phase == SessionPhase::Waiting) {
@@ -334,40 +512,44 @@ impl DriftRuntime {
                 }
             }
             if fire {
-                let _ = app.emit("drift-moment", self.build_tick(&snap, class, longest, waiting_total, running_count, seconds_to_death));
+                let _ = app.emit("drift-moment", self.build_tick(&snap, waiting_total, running_count, seconds_to_death, frozen));
                 if s.drift_moment_intensity != "passive" {
                     notify::drift(app, &snap.app_name, &self.project_name);
                 }
             }
         }
 
-        let _ = app.emit("focus-tick", self.build_tick(&snap, class, longest, waiting_total, running_count, seconds_to_death));
+        let _ = app.emit("focus-tick", self.build_tick(&snap, waiting_total, running_count, seconds_to_death, frozen));
     }
 
     fn build_tick(
         &self,
         snap: &watcher::Snapshot,
-        class: AppClass,
-        since_stop: Option<u64>,
         waiting_sessions: i64,
         running_sessions: i64,
         seconds_to_death: Option<i64>,
+        frozen: bool,
     ) -> FocusTickDto {
         FocusTickDto {
             ts: chrono::Utc::now().to_rfc3339(),
-            app_id: snap.app_name.clone(),
-            app_name: snap.app_name.clone(),
-            app_class: class.as_str().to_string(),
-            title: if snap.title.is_empty() { None } else { Some(snap.title.clone()) },
-            idle_secs: snap.idle_secs as i64,
             state: self.state.clone(),
-            active_project_id: self.project_id.clone(),
-            active_project_name: if self.project_name.is_empty() { None } else { Some(self.project_name.clone()) },
-            cloud_health: self.health,
-            seconds_since_claude_finished: since_stop.map(|x| x as i64),
+            app_name: snap.app_name.clone(),
+            cloud_health: self.health, // now `life` on the 0..CAP (130) scale
+            baseline: BASELINE,
+            cap: CAP,
             waiting_sessions,
             running_sessions,
             seconds_to_death,
+            active_secs_today: self.active_secs,
+            distract_secs_today: self.distract_secs,
+            work_secs_today: self.work_secs,
+            monitored_secs_today: self.monitored_secs,
+            frozen,
+            color_hue: self
+                .project_id
+                .as_deref()
+                .map(crate::water::hue_for)
+                .unwrap_or(222),
         }
     }
 }
@@ -389,7 +571,7 @@ mod tests {
     #[test]
     fn one_waiting_session_is_one_x() {
         let (total, per_project, longest) =
-            waiting_load(&[(Some("A".to_string()), 100)], 90);
+            waiting_load(&[(Some("A"), 100)], 90);
         assert_eq!(total, 1);
         assert_eq!(per_project.get("A"), Some(&1));
         assert_eq!(longest, Some(100));
@@ -398,11 +580,11 @@ mod tests {
     #[test]
     fn multiplier_counts_past_grace_sessions_per_project() {
         let sessions = vec![
-            (Some("A".to_string()), 120),
-            (Some("A".to_string()), 100),
-            (Some("B".to_string()), 200),
-            (Some("A".to_string()), 30),   // under grace — excluded from counts
-            (Some("B".to_string()), 5000), // abandoned — excluded entirely
+            (Some("A"), 120),
+            (Some("A"), 100),
+            (Some("B"), 200),
+            (Some("A"), 30),   // under grace — excluded from counts
+            (Some("B"), 5000), // abandoned — excluded entirely
         ];
         let (total, per_project, longest) = waiting_load(&sessions, 90);
         assert_eq!(total, 3); // 2xA + 1xB past grace
@@ -415,6 +597,7 @@ mod tests {
     fn empty_session_id_buckets_under_fallback() {
         let (total, per_project, _) =
             waiting_load(&[(None, 100), (None, 100)], 90);
+        // (None entries bucket under the "_" fallback key)
         assert_eq!(total, 2);
         assert_eq!(per_project.get("_"), Some(&2));
     }
@@ -422,33 +605,201 @@ mod tests {
     #[test]
     fn sub_grace_only_yields_zero_multiplier() {
         let (total, per_project, longest) =
-            waiting_load(&[(Some("A".to_string()), 10)], 90);
+            waiting_load(&[(Some("A"), 10)], 90);
         assert_eq!(total, 0);
         assert!(per_project.is_empty());
         assert_eq!(longest, Some(10)); // still drives the away-timer
     }
 
+    // ----- life_rate (the two forces, netted) -----
+
+    const T: f64 = 12.0; // default time-to-death (min)
+    const RATIO: f64 = 0.1; // default heal/drain ratio
+    // R = baseline / T = 100/12 ≈ 8.3333 %/min per waiting session.
+    const R: f64 = BASELINE / T;
+
     #[test]
-    fn countdown_scales_with_waiting_count() {
-        // full health, decay 0.06/min: 1 session ≈ 1000s (~16.7m), 4 ≈ 250s
-        assert_eq!(seconds_to_death(1.0, 1, 0.06), Some(1000));
-        assert_eq!(seconds_to_death(1.0, 4, 0.06), Some(250));
-        assert_eq!(seconds_to_death(1.0, 0, 0.06), None);
+    fn r_equals_baseline_over_t() {
+        // The base rate identity: one waiting session on a distraction drains R%/min.
+        let rate = life_rate(true, 1, 0, BASELINE, T, RATIO);
+        assert!((rate - (-R)).abs() < 1e-9);
+        assert!((R - 8.333333333).abs() < 1e-6);
     }
 
     #[test]
-    fn holds_when_no_distraction_and_no_tokens() {
-        // session waiting, but on a neutral app, no tokens → unchanged
-        assert_eq!(apply_focus(0.5, 2.0, false, 1, 0, 0.06, 4e-6), 0.5);
+    fn drain_only_when_on_distraction() {
+        // 2 waiting on a distraction, no running → −2R%/min.
+        let r = life_rate(true, 2, 0, BASELINE, T, RATIO);
+        assert!((r - (-2.0 * R)).abs() < 1e-9);
+        // Same waiting but NOT on a distraction → no drain at all.
+        assert_eq!(life_rate(false, 2, 0, BASELINE, T, RATIO), 0.0);
     }
+
     #[test]
-    fn decays_only_when_drifting() {
-        let h = apply_focus(0.5, 60.0, true, 2, 0, 0.06, 4e-6); // 1 min, 2 waiting
-        assert!((h - (0.5 - 0.12)).abs() < 1e-9);
+    fn heal_only_when_running() {
+        // 1 running window heals ratio·R, regardless of foreground (distraction or not).
+        let on = life_rate(true, 0, 1, BASELINE, T, RATIO);
+        let off = life_rate(false, 0, 1, BASELINE, T, RATIO);
+        assert!((on - RATIO * R).abs() < 1e-9);
+        assert!((off - RATIO * R).abs() < 1e-9);
+        // More windows heal faster.
+        assert!((life_rate(false, 0, 3, BASELINE, T, RATIO) - 3.0 * RATIO * R).abs() < 1e-9);
     }
+
     #[test]
-    fn recovers_from_tokens() {
-        let h = apply_focus(0.5, 2.0, false, 0, 50_000, 0.06, 4e-6); // 50k tokens → +0.2
-        assert!((h - 0.7).abs() < 1e-9);
+    fn heal_nets_against_drain() {
+        // On a distraction with 1 waiting and 1 running: net = ratio·R − R = −0.9R.
+        let r = life_rate(true, 1, 1, BASELINE, T, RATIO);
+        assert!((r - (RATIO * R - R)).abs() < 1e-9);
+        assert!(r < 0.0);
+        // Ten running windows out-heal one waiting session → net positive.
+        let r2 = life_rate(true, 1, 10, BASELINE, T, RATIO);
+        assert!((r2 - (10.0 * RATIO * R - R)).abs() < 1e-9);
+        assert!(r2 > 0.0);
+    }
+
+    #[test]
+    fn ten_min_work_equals_one_min_distraction() {
+        // The user's intended rule at ratio=0.1: heal per running = ratio·R,
+        // drain per waiting = R, so 10 min of 1 running = 1 min of 1 waiting.
+        let heal_per_min = RATIO * R; // life gained / min by one running window
+        let drain_per_min = R; // life lost / min by one ignored waiting session
+        assert!((heal_per_min * 10.0 - drain_per_min * 1.0).abs() < 1e-9);
+    }
+
+    // ----- apply_life -----
+
+    #[test]
+    fn apply_life_drains_over_dt() {
+        // 1 waiting on a distraction for 60s at default settings → −R points.
+        let rate = life_rate(true, 1, 0, BASELINE, T, RATIO);
+        let life = apply_life(BASELINE, 60.0, rate, false);
+        assert!((life - (BASELINE - R)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_life_clamps_at_zero() {
+        // Huge drain can't push life below 0.
+        let life = apply_life(5.0, 600.0, -R, false);
+        assert_eq!(life, 0.0);
+    }
+
+    #[test]
+    fn apply_life_clamps_at_cap() {
+        // Healing can't push life above CAP (130).
+        let life = apply_life(CAP - 1.0, 600.0, RATIO * R, false);
+        assert_eq!(life, CAP);
+    }
+
+    #[test]
+    fn apply_life_frozen_is_noop() {
+        // Frozen (idle/paused): no change regardless of rate.
+        assert_eq!(apply_life(73.0, 60.0, -R, true), 73.0);
+        assert_eq!(apply_life(73.0, 60.0, RATIO * R, true), 73.0);
+    }
+
+    // ----- countdown_secs (honest net rate) -----
+
+    #[test]
+    fn countdown_some_only_when_net_draining() {
+        // Net-draining at full baseline, 1 waiting on a distraction: 100 / R min.
+        let rate = life_rate(true, 1, 0, BASELINE, T, RATIO);
+        let expected = ((BASELINE / R) * 60.0).round() as i64; // == T·60 = 720s
+        assert_eq!(countdown_secs(BASELINE, rate), Some(expected));
+        assert_eq!(countdown_secs(BASELINE, rate), Some(720));
+        // Net ≥ 0 → no countdown.
+        assert_eq!(countdown_secs(BASELINE, 0.0), None);
+        assert_eq!(countdown_secs(BASELINE, RATIO * R), None);
+    }
+
+    #[test]
+    fn countdown_scales_with_waiting_shrinks_with_running() {
+        // 4 waiting drains 4× as fast → countdown ~1/4 as long.
+        let one = countdown_secs(BASELINE, life_rate(true, 1, 0, BASELINE, T, RATIO)).unwrap();
+        let four = countdown_secs(BASELINE, life_rate(true, 4, 0, BASELINE, T, RATIO)).unwrap();
+        assert_eq!(four, (one as f64 / 4.0).round() as i64);
+        // Adding a running window softens the drain → longer countdown.
+        let softened =
+            countdown_secs(BASELINE, life_rate(true, 4, 1, BASELINE, T, RATIO)).unwrap();
+        assert!(softened > four);
+    }
+
+    // ----- focus_state (the canonical 5-state machine) -----
+
+    #[test]
+    fn state_vibing_when_running_not_distracted() {
+        // Claude working, nothing waiting, neutral foreground → vibing (state 1).
+        assert_eq!(focus_state(false, false, false, 0, 0, 2), "vibing");
+    }
+
+    #[test]
+    fn state_waiting_when_turn_waiting_not_distracted() {
+        // A turn is waiting, neutral foreground → waiting (state 2), even during
+        // grace (waiting_total>0, past_grace=0) so the buddy reacts immediately.
+        assert_eq!(focus_state(false, false, false, 1, 0, 0), "waiting");
+        assert_eq!(focus_state(false, false, false, 1, 1, 1), "waiting");
+    }
+
+    #[test]
+    fn state_drifting_on_distraction_with_waiting_past_grace() {
+        // On a distraction while a turn waits past grace → drifting (state 3).
+        assert_eq!(focus_state(false, false, true, 1, 1, 0), "drifting");
+        // During grace (past_grace=0) it's not drifting yet → chillin.
+        assert_eq!(focus_state(false, false, true, 1, 0, 0), "chillin");
+    }
+
+    #[test]
+    fn state_chillin_on_distraction_nothing_waiting() {
+        // On a distraction, nothing waiting → chillin (state 4) — whether or not
+        // Claude is running in the background.
+        assert_eq!(focus_state(false, false, true, 0, 0, 0), "chillin");
+        assert_eq!(focus_state(false, false, true, 0, 0, 3), "chillin");
+    }
+
+    #[test]
+    fn state_idle_when_nothing_happening() {
+        // No session, neutral foreground → idle (state 5).
+        assert_eq!(focus_state(false, false, false, 0, 0, 0), "idle");
+    }
+
+    #[test]
+    fn state_paused_and_away_override_everything() {
+        // Paused beats all, including a distraction with a waiting turn.
+        assert_eq!(focus_state(true, false, true, 5, 5, 5), "paused");
+        // Away (frozen) reads as idle even on a distraction with a waiting turn.
+        assert_eq!(focus_state(false, true, true, 5, 5, 5), "idle");
+        // Paused wins over away.
+        assert_eq!(focus_state(true, true, true, 1, 1, 1), "paused");
+    }
+
+    // ----- daily reset keyed to resetTimeLocal -----
+
+    fn at(h: u32, m: u32) -> chrono::DateTime<Local> {
+        use chrono::TimeZone;
+        Local.with_ymd_and_hms(2026, 6, 1, h, m, 0).unwrap()
+    }
+
+    #[test]
+    fn reset_day_id_before_reset_time_belongs_to_yesterday() {
+        // At 04:30 with reset 05:00, the slate is still 2026-05-31's.
+        assert_eq!(reset_day_id(&at(4, 30), "05:00"), "2026-05-31");
+        // At 05:00 exactly, we flip to today's slate.
+        assert_eq!(reset_day_id(&at(5, 0), "05:00"), "2026-06-01");
+        // Later in the day stays on today's slate.
+        assert_eq!(reset_day_id(&at(23, 59), "05:00"), "2026-06-01");
+    }
+
+    #[test]
+    fn daily_reset_fires_once_at_reset_time() {
+        // Yesterday's slate persisted; first tick at/after reset time is a new day.
+        let last = "2026-05-31".to_string();
+        // Before reset time → still yesterday's slate → no reset.
+        assert_eq!(reset_day_id(&at(4, 59), "05:00"), last);
+        // At reset time → new slate id → reset fires.
+        let new_day = reset_day_id(&at(5, 0), "05:00");
+        assert_ne!(new_day, last);
+        assert_eq!(new_day, "2026-06-01");
+        // A later tick the same day yields the same id → no second reset.
+        assert_eq!(reset_day_id(&at(9, 0), "05:00"), new_day);
     }
 }

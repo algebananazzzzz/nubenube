@@ -8,7 +8,6 @@ use crate::settings::Settings;
 
 pub struct Snapshot {
     pub app_name: String,
-    pub title: String,
     pub idle_secs: u64,
 }
 
@@ -18,24 +17,15 @@ pub enum AppClass {
     Neutral,
 }
 
-impl AppClass {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            AppClass::Distraction => "distraction",
-            AppClass::Neutral => "neutral",
-        }
-    }
-}
-
 pub fn snapshot() -> Snapshot {
-    let (app_name, title) = match active_win_pos_rs::get_active_window() {
-        Ok(w) => (w.app_name, w.title),
-        Err(_) => (String::new(), String::new()),
+    let app_name = match active_win_pos_rs::get_active_window() {
+        Ok(w) => w.app_name,
+        Err(_) => String::new(),
     };
     let idle_secs = user_idle::UserIdle::get_time()
         .map(|u| u.as_seconds())
         .unwrap_or(0);
-    Snapshot { app_name, title, idle_secs }
+    Snapshot { app_name, idle_secs }
 }
 
 /// Distraction iff the active app's name exactly matches (case-insensitive) a

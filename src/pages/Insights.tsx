@@ -1,212 +1,590 @@
-// Insights — the celebratory, honest aggregate. Total water evaporated, the
-// global token composition collated across ALL projects, focus vs drift, and
-// where the water went. All real, from get_totals + get_insights(range).
+// Insights — lifetime water + tokens (hero), range-scoped focus split,
+// distraction breakdown, token composition, and the projects list.
+// Ported from insights.jsx, wired to get_totals / get_insights / get_projects.
 
-import { useNavigate } from 'react-router-dom'
-import { useUsage } from '../store/usage'
-import { Donut, INK, SUB, FAINT, shadow, elev, fmt } from '../components/ui'
-import { hueClay } from '../lib/clay'
-import { tokenSegs, sumTokenM } from '../lib/derive'
-import { formatCount, formatDuration, shortPath } from '../lib/format'
-import { formatWater, funWater } from '../theme/units'
-import type { Project, RangeKey } from '../types'
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useUsage } from "../store/usage";
+import { usePrefs } from "../store/prefs";
+import { hueSwatch } from "../lib/clay";
+import { formatCount } from "../lib/format";
+import type { Project, RangeKey, TokenBreakdown } from "../types";
+import { Card, Pill, Eyebrow, Donut, SegTabs } from "../components/ui";
 
-const litres = (ml: number) => ml / 1000
-const tokenTotal = (p: Project) => p.tokens.input + p.tokens.output + p.tokens.cacheCreate + p.tokens.cacheRead
-const RANGES: { k: RangeKey; label: string }[] = [
-  { k: 'today', label: 'today' },
-  { k: 'week', label: 'week' },
-  { k: 'month', label: 'month' },
-  { k: 'all', label: 'all-time' },
-]
+const RANGE_LABEL: Record<RangeKey, string> = {
+  today: "today",
+  week: "this week",
+  month: "this month",
+  all: "all-time",
+};
 
-function StatCard({ label, value, sub, color }: { label: string; value: string; sub: string; color?: string }) {
+function sumTokens(t: TokenBreakdown): number {
   return (
-    <div style={{ flex: 1, padding: '15px 16px', background: 'var(--surface)', borderRadius: 14, border: elev.border, boxShadow: shadow.sm }}>
-      <div style={{ fontWeight: 700, fontSize: 10.5, color: FAINT, letterSpacing: '.05em', textTransform: 'uppercase' }}>{label}</div>
-      <div className="nn-num" style={{ fontWeight: 800, fontSize: 25, color: color || INK, marginTop: 5 }}>{value}</div>
-      <div style={{ fontWeight: 600, fontSize: 11, color: FAINT, marginTop: 3 }}>{sub}</div>
+    (t.input || 0) + (t.output || 0) + (t.cacheCreate || 0) + (t.cacheRead || 0)
+  );
+}
+function fmtSecs(s: number): string {
+  return s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`;
+}
+
+function waterFromTokens(t: TokenBreakdown): number {
+  const read = (t.input || 0) + (t.cacheCreate || 0) + (t.cacheRead || 0)
+  return 0.0002 * read + 0.0015 * (t.output || 0)
+}
+
+function WaterHero({ range, tokens }: { range: RangeKey; tokens: TokenBreakdown }) {
+  const rl = RANGE_LABEL[range];
+  const litres = Math.round(waterFromTokens(tokens) / 1000);
+  const tokCount = formatCount(sumTokens(tokens));
+  return (
+    <Card pad={22}>
+      <Eyebrow style={{ fontSize: 12, marginBottom: 12 }}>
+        Water evaporated · {rl}
+      </Eyebrow>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span
+          className="nn-num"
+          style={{
+            fontSize: 52,
+            fontWeight: 700,
+            color: "var(--ink)",
+            lineHeight: 0.9,
+          }}
+        >
+          {litres.toLocaleString()}
+        </span>
+        <span
+          className="nn-disp"
+          style={{ fontSize: 20, fontWeight: 600, color: "var(--faint)" }}
+        >
+          litres
+        </span>
+      </div>
+      <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 7 }}>
+        <Pill kind="neutral" style={{ fontSize: 12 }}>
+          {tokCount} tokens {rl}
+        </Pill>
+      </div>
+      <div
+        style={{
+          marginTop: 13,
+          paddingTop: 13,
+          borderTop: "1px solid var(--line-faint)",
+          display: "flex",
+          gap: 8,
+          fontSize: 12,
+          color: "var(--faint)",
+          lineHeight: 1.5,
+        }}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          style={{ flexShrink: 0, marginTop: 1 }}
+        >
+          <circle cx="8" cy="8" r="6.5" />
+          <path d="M8 7.2v3.4" strokeLinecap="round" />
+          <circle cx="8" cy="5" r=".7" fill="currentColor" stroke="none" />
+        </svg>
+        <span>
+          Estimatation: about{" "}
+          <strong style={{ color: "var(--text)", fontWeight: 600 }}>
+            0.2 mL
+          </strong>{" "}
+          of data-center cooling water per 1,000 tokens read (output tokens cost
+          ~8× more), grounded in{" "}
+          <a
+            href="https://arxiv.org/abs/2304.03271"
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              color: "var(--accent-text)",
+              fontWeight: 600,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            real research ↗
+          </a>
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+function FocusRow({
+  label,
+  value,
+  tone,
+  last,
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+  last?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "11px 0",
+        borderBottom: last ? "none" : "1px solid var(--line-faint)",
+      }}
+    >
+      <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 500 }}>
+        {label}
+      </span>
+      <span
+        className="nn-num"
+        style={{ fontSize: 14, fontWeight: 600, color: tone || "var(--ink)" }}
+      >
+        {value}
+      </span>
     </div>
-  )
+  );
+}
+
+function DistractionRow({
+  name,
+  secs,
+  max,
+  last,
+}: {
+  name: string;
+  secs: number;
+  max: number;
+  last?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        padding: "11px 0",
+        borderBottom: last ? "none" : "1px solid var(--line-faint)",
+      }}
+    >
+      <div
+        style={{
+          width: 108,
+          fontSize: 13.5,
+          fontWeight: 500,
+          color: "var(--ink)",
+          flexShrink: 0,
+        }}
+      >
+        {name}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div
+          style={{
+            height: 8,
+            borderRadius: 999,
+            background: "var(--surface-strong)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: `${Math.max(8, (secs / max) * 100)}%`,
+              height: "100%",
+              borderRadius: 999,
+              background: "var(--warning)",
+            }}
+          />
+        </div>
+      </div>
+      <div
+        className="nn-num"
+        style={{
+          width: 38,
+          textAlign: "right",
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--critical)",
+        }}
+      >
+        {fmtSecs(secs)}
+      </div>
+    </div>
+  );
+}
+
+function ProjectRow({ p, last }: { p: Project; last?: boolean }) {
+  const [h, setH] = useState(false);
+  const navigate = useNavigate();
+  const dark = usePrefs((s) => s.theme) === "dark";
+  const litres = Math.round(p.waterMl / 1000);
+  return (
+    <div
+      onMouseEnter={() => setH(true)}
+      onMouseLeave={() => setH(false)}
+      onClick={() => navigate(`/project/${encodeURIComponent(p.id)}`)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 13,
+        padding: "11px 12px",
+        borderRadius: "var(--r-sm)",
+        cursor: "pointer",
+        background: h ? "var(--surface-hover)" : "transparent",
+        borderBottom: last ? "none" : "1px solid var(--line-faint)",
+        transition: "background .14s",
+      }}
+    >
+      <span
+        style={{
+          width: 9,
+          height: 9,
+          borderRadius: "50%",
+          background: hueSwatch(p.colorHue, dark),
+          flexShrink: 0,
+        }}
+      />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13.5,
+            fontWeight: 600,
+            color: "var(--ink)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {p.name}
+        </div>
+        <div
+          className="nn-mono"
+          style={{
+            fontSize: 11.5,
+            color: "var(--faint)",
+            fontWeight: 500,
+            marginTop: 2,
+          }}
+        >
+          {p.rootPath}
+        </div>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 6,
+          flexShrink: 0,
+        }}
+      >
+        <span
+          className="nn-num"
+          style={{ fontSize: 13.5, fontWeight: 600, color: "var(--ink)" }}
+        >
+          {litres} L
+        </span>
+        <span
+          className="nn-num"
+          style={{ fontSize: 11.5, fontWeight: 500, color: "var(--faint)" }}
+        >
+          / {formatCount(sumTokens(p.tokens))}
+        </span>
+      </div>
+      <span
+        className="nn-ui"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          flexShrink: 0,
+          padding: "5px 10px",
+          borderRadius: "var(--r-sm)",
+          border: "1px solid var(--line)",
+          background: h ? "var(--surface)" : "transparent",
+          color: "var(--text)",
+          fontSize: 12,
+          fontWeight: 600,
+          transition: "background .14s",
+          opacity: h ? 1 : 0.55,
+        }}
+      >
+        Details
+      </span>
+    </div>
+  );
+}
+
+function InsightsEmpty() {
+  return (
+    <Card pad={40} style={{ textAlign: "center" }}>
+      <div
+        style={{
+          width: 64,
+          height: 64,
+          margin: "0 auto 16px",
+          borderRadius: "var(--r-md)",
+          background: "var(--surface-strong)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--faint)",
+        }}
+      >
+        <svg
+          width="26"
+          height="26"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        >
+          <path d="M4 20V6M4 20h16M9 16l3.5-4.5L16 13l4-6" />
+        </svg>
+      </div>
+      <div
+        className="nn-disp"
+        style={{ fontSize: 18, color: "var(--ink)", marginBottom: 8 }}
+      >
+        Nothing to show yet
+      </div>
+      <div
+        style={{
+          fontSize: 13.5,
+          color: "var(--text)",
+          lineHeight: 1.55,
+          maxWidth: "40ch",
+          margin: "0 auto",
+        }}
+      >
+        Work with Claude for a while and your focus trends, distractions, and
+        water output collect here.
+      </div>
+    </Card>
+  );
 }
 
 export function Insights() {
-  const totals = useUsage((s) => s.totals)
-  const insights = useUsage((s) => s.insights)
-  const projects = useUsage((s) => s.projects)
-  const range = useUsage((s) => s.range)
-  const setRange = useUsage((s) => s.setRange)
-  const navigate = useNavigate()
+  const totals = useUsage((s) => s.totals);
+  const insights = useUsage((s) => s.insights);
+  const projects = useUsage((s) => s.projects);
+  const range = useUsage((s) => s.range);
+  const setRange = useUsage((s) => s.setRange);
+  const loaded = useUsage((s) => s.loaded);
 
-  const ic = hueClay(268)
-  const allTime = totals?.waterMl ?? projects.reduce((s, p) => s + p.waterMl, 0)
-  const fun = funWater(allTime)
+  if (loaded && (!totals || totals.waterMl <= 0) && projects.length === 0)
+    return <InsightsEmpty />;
 
-  const segs = insights ? tokenSegs(insights.tokens, 268) : []
-  const aggTok = insights ? sumTokenM(insights.tokens) : 0
+  const dist = insights?.distractionBreakdown ?? [];
+  const maxD = Math.max(...dist.map((d) => d.secs), 1);
+  const totalDistract = dist.reduce((a, d) => a + d.secs, 0);
+  const rl = RANGE_LABEL[range];
 
-  const focusSecs = insights?.claudeActiveSecs ?? 0
-  const breakdown = insights?.distractionBreakdown ?? []
-  const breakdownTotal = breakdown.reduce((s, b) => s + b.secs, 0)
-  const streak = insights?.longestFocusStreakSecs ?? 0
-  const msgs = projects.reduce((s, p) => s + p.msgCount, 0)
-
-  const sorted = [...projects].sort((a, b) => b.waterMl - a.waterMl)
+  const T = insights?.tokens ?? {
+    input: 0,
+    output: 0,
+    cacheCreate: 0,
+    cacheRead: 0,
+  };
+  const toks = [
+    { label: "cache read", value: T.cacheRead, color: "var(--accent)" },
+    { label: "cache write", value: T.cacheCreate, color: "#a5b4fc" },
+    { label: "output", value: T.output, color: "#c7d2fe" },
+    { label: "input", value: T.input, color: "#4f46e5" },
+  ];
+  const totalTok = toks.reduce((a, t) => a + t.value, 0) || 1;
 
   return (
-    <div className="nn-ui" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '20px 22px', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div className="nn-disp" style={{ fontWeight: 800, fontSize: 23, color: INK, lineHeight: 1, letterSpacing: '-.01em' }}>insights</div>
-        <div style={{ display: 'flex', gap: 4, background: 'rgba(120,100,170,.08)', borderRadius: 99, padding: 3 }}>
-          {RANGES.map((r) => (
-            <button
-              key={r.k}
-              onClick={() => setRange(r.k)}
-              style={{ border: 'none', cursor: 'pointer', borderRadius: 99, padding: '6px 13px', fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 12, background: range === r.k ? '#fff' : 'transparent', color: range === r.k ? INK : SUB, boxShadow: range === r.k ? shadow.sm : 'none' }}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+        }}
+      >
+        <SegTabs<RangeKey>
+          tabs={[
+            { key: "today", label: "Today" },
+            { key: "week", label: "Week" },
+            { key: "month", label: "Month" },
+            { key: "all", label: "All-time" },
+          ]}
+          value={range}
+          onChange={(r) => void setRange(r)}
+          size="sm"
+        />
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', paddingRight: 6, display: 'flex', flexDirection: 'column', gap: 13 }}>
-        {/* hero */}
-        <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 18, padding: '22px 24px', color: '#fff', display: 'flex', flexDirection: 'column', gap: 11, flexShrink: 0, background: 'linear-gradient(135deg, hsl(268 64% 72%), hsl(246 62% 66%) 50%, hsl(210 66% 64%))', boxShadow: '0 20px 42px -22px rgba(110,90,210,.7)' }}>
-          <div style={{ position: 'absolute', top: -30, right: 2, fontSize: 130, opacity: 0.13 }}>💧</div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 12, opacity: 0.9, letterSpacing: '.05em', textTransform: 'uppercase' }}>total water evaporated · all-time</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
-              <span className="nn-num" style={{ fontWeight: 800, fontSize: 50, lineHeight: 1 }}>{fmt(litres(allTime), allTime < 10_000 ? 1 : 0)}</span>
-              <span className="nn-disp" style={{ fontWeight: 700, fontSize: 19 }}>litres</span>
-            </div>
-          </div>
-          <div style={{ display: 'inline-flex', alignSelf: 'flex-start', gap: 8, background: 'rgba(255,255,255,.18)', borderRadius: 99, padding: '6px 14px', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
-            ≈ {fun.count} {fun.unit} · {formatWater(allTime)} exactly
-          </div>
+      {/* hero + key stats */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 14,
+          alignItems: "stretch",
+        }}
+      >
+        <WaterHero range={range} tokens={T} />
+        <Card pad={20}>
+          <Eyebrow style={{ fontSize: 12, marginBottom: 6 }}>{rl}</Eyebrow>
+          <FocusRow
+            label="Claude working"
+            value={fmtSecs(insights?.claudeActiveSecs ?? 0)}
+            tone="var(--success)"
+          />
+          <FocusRow
+            label="Claude idle"
+            value={fmtSecs(insights?.claudeIdleSecs ?? 0)}
+            tone="var(--warning)"
+          />
+          <FocusRow
+            label="Time on distractions"
+            value={fmtSecs(totalDistract)}
+            tone="var(--critical)"
+            last
+          />
+        </Card>
+      </div>
+
+      {/* distractions */}
+      <Card pad={22}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+          }}
+        >
+          <Eyebrow style={{ 
+            fontSize: 12 ,
+            marginBottom: 6,
+          }}>
+            Time lost to distractions · {rl}
+          </Eyebrow>
+          <span
+            className="nn-num"
+            style={{ fontSize: 14, fontWeight: 600, color: "var(--critical)" }}
+          >
+            {fmtSecs(totalDistract)}
+          </span>
         </div>
-
-        {/* honest stat cards (range-scoped) */}
-        <div style={{ display: 'flex', gap: 12, flexShrink: 0 }}>
-          <StatCard label="time Claude worked" value={formatDuration(focusSecs)} sub={`tokens flowing · this ${range}`} color="#2f8a76" />
-          <StatCard label="time drifted" value={formatDuration(breakdownTotal)} sub="distraction while Claude waited" color="var(--danger)" />
-          <StatCard label="longest focus" value={formatDuration(streak)} sub="best unbroken stretch" color="#6a4aa8" />
-        </div>
-
-        {/* time lost to distractions (per app, range-scoped) */}
-        <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 18, border: elev.border, boxShadow: shadow.md, flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
-            <div style={{ fontWeight: 700, fontSize: 12.5, color: SUB, letterSpacing: '.02em' }}>TIME LOST TO DISTRACTIONS · this {range}</div>
-            <span className="nn-num" style={{ fontWeight: 800, fontSize: 14, color: 'var(--danger)' }}>{formatDuration(breakdownTotal)}</span>
+        {dist.length === 0 && (
+          <div
+            style={{
+              textAlign: "center",
+              padding: "16px 0 4px",
+              color: "var(--faint)",
+              fontSize: 13,
+            }}
+          >
+            No distractions tracked {rl}. Nice.
           </div>
-          <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT, marginBottom: 10 }}>only counts time on apps you tagged as distractions while Claude was waiting</div>
-          {breakdown.length === 0 ? (
-            <div style={{ fontWeight: 600, fontSize: 12.5, color: FAINT, padding: '6px 0' }}>no drift yet — nice 💚</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {breakdown.map((b, i) => {
-                const max = breakdown[0]?.secs || 1
-                return (
-                  <div key={b.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 2px', borderTop: i === 0 ? 'none' : '1px solid rgba(120,100,170,.1)' }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, color: INK, width: 140, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</span>
-                    <div style={{ flex: 1, height: 8, borderRadius: 99, background: 'rgba(120,100,170,.12)', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${Math.max(4, (b.secs / max) * 100)}%`, background: 'linear-gradient(90deg, hsl(28 80% 62%), hsl(8 78% 60%))' }} />
-                    </div>
-                    <span className="nn-num" style={{ fontWeight: 800, fontSize: 12.5, color: 'var(--danger)', width: 64, textAlign: 'right' }}>{formatDuration(b.secs)}</span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
+        )}
+        {dist.map((d, i) => (
+          <DistractionRow
+            key={d.name}
+            name={d.name}
+            secs={d.secs}
+            max={maxD}
+            last={i === dist.length - 1}
+          />
+        ))}
+      </Card>
 
-        {/* token composition + focus · all projects */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 13, flexShrink: 0 }}>
-          <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 18, border: elev.border, boxShadow: shadow.md }}>
-            <div style={{ fontWeight: 700, fontSize: 12.5, color: SUB, letterSpacing: '.02em' }}>TOKEN COMPOSITION · all projects · this {range}</div>
-            <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT, marginTop: 3, marginBottom: 12 }}>where every token went — cache reads dominate as Claude re-reads your code</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 22 }}>
-              <Donut
-                segs={segs}
-                size={132}
-                thickness={20}
-                center={
-                  <div style={{ textAlign: 'center' }}>
-                    <div className="nn-num" style={{ fontWeight: 800, fontSize: 22, color: INK, lineHeight: 1 }}>{formatCount(aggTok * 1e6)}</div>
-                    <div style={{ fontWeight: 700, fontSize: 10, color: FAINT, letterSpacing: '.04em' }}>tokens</div>
-                  </div>
-                }
-              />
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {segs.map((s) => {
-                  const pct = aggTok > 0 ? Math.round((s.value / aggTok) * 100) : 0
-                  return (
-                    <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ width: 11, height: 11, borderRadius: 4, background: s.color, flexShrink: 0 }} />
-                      <span style={{ fontWeight: 700, fontSize: 12.5, color: INK, flex: 1 }}>{s.label}</span>
-                      <span className="nn-num" style={{ fontWeight: 800, fontSize: 12.5, color: INK }}>{formatCount(s.value * 1e6)}</span>
-                      <span style={{ fontWeight: 700, fontSize: 11.5, color: FAINT, width: 34, textAlign: 'right' }}>{pct}%</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 18, border: elev.border, boxShadow: shadow.md, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontWeight: 700, fontSize: 12.5, color: SUB, letterSpacing: '.02em', marginBottom: 13 }}>FOCUS · this {range}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-              {([['time focused', formatDuration(focusSecs), ic.deep], ['Claude waited', formatDuration(breakdownTotal), 'var(--danger)'], ['water this range', formatWater(insights?.waterMl ?? 0), INK], ['messages all-time', msgs.toLocaleString(), INK]] as [string, string, string][]).map(([l, v, col]) => (
-                <div key={l} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                  <span style={{ fontWeight: 600, fontSize: 12.5, color: SUB, whiteSpace: 'nowrap' }}>{l}</span>
-                  <span className="nn-num" style={{ fontWeight: 800, fontSize: 14, color: col, whiteSpace: 'nowrap', flexShrink: 0 }}>{v}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* projects — where the water went (tap for detail) */}
-        <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 18, border: elev.border, boxShadow: shadow.md, flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ fontWeight: 700, fontSize: 12.5, color: SUB, letterSpacing: '.02em' }}>PROJECTS · where the water went</div>
-            <span style={{ fontWeight: 600, fontSize: 11.5, color: FAINT }}>{sorted.length} projects · tap for detail</span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {sorted.map((p, i) => {
-              const c = hueClay(p.colorHue)
-              const go = () => navigate(`/project/${encodeURIComponent(p.id)}`)
-              return (
-                <div
-                  key={p.id}
-                  onClick={go}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`open ${p.name}`}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go() } }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 6px', cursor: 'pointer', borderTop: i === 0 ? 'none' : '1px solid rgba(120,100,170,.1)' }}
+      {/* token composition */}
+      <Card pad={20}>
+        <Eyebrow style={{ 
+          fontSize: 12,
+          marginBottom: 12
+        }}>Token composition · {rl}</Eyebrow>
+        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          <Donut
+            segments={toks.map((t) => ({ value: t.value, color: t.color }))}
+            label={formatCount(totalTok)}
+            sub="tokens"
+            size={116}
+          />
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {toks.map((t) => (
+              <div
+                key={t.label}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  fontSize: 13,
+                }}
+              >
+                <span
+                  style={{
+                    width: 9,
+                    height: 9,
+                    borderRadius: 2,
+                    background: t.color,
+                    flexShrink: 0,
+                  }}
+                />
+                <span style={{ fontWeight: 500, color: "var(--ink)", flex: 1 }}>
+                  {t.label}
+                </span>
+                <span
+                  className="nn-num"
+                  style={{ color: "var(--text)", fontWeight: 600 }}
                 >
-                  <span style={{ width: 14, height: 14, borderRadius: 99, background: `radial-gradient(circle at 35% 30%, ${c.light}, ${c.deep})`, flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13.5, color: INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                    <div style={{ fontWeight: 600, fontSize: 11, color: FAINT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{shortPath(p.rootPath)}</div>
-                  </div>
-                  <span className="nn-num" style={{ fontWeight: 800, fontSize: 13, color: c.ink, whiteSpace: 'nowrap' }}>{fmt(litres(p.waterMl), 0)} L</span>
-                  <span style={{ fontWeight: 600, fontSize: 11.5, color: FAINT, whiteSpace: 'nowrap' }}>/ {formatCount(tokenTotal(p))}</span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); go() }}
-                    aria-label={`info about ${p.name}`}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: elev.border, background: '#fff', cursor: 'pointer', borderRadius: 99, padding: '6px 11px', fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 11.5, color: c.deep, boxShadow: shadow.sm, flexShrink: 0 }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c.deep} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 7.5h.01" /></svg>
-                    info
-                  </button>
-                </div>
-              )
-            })}
+                  {formatCount(t.value)}
+                </span>
+                <span
+                  className="nn-num"
+                  style={{
+                    color: "var(--faint)",
+                    fontWeight: 500,
+                    width: 34,
+                    textAlign: "right",
+                  }}
+                >
+                  {Math.round((t.value / totalTok) * 100)}%
+                </span>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
+      </Card>
+
+      {/* projects */}
+      <Card pad={14}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            margin: "6px 12px 8px",
+          }}
+        >
+          <Eyebrow style={{ fontSize: 12 }}>
+            Projects · all time
+          </Eyebrow>
+          <span
+            style={{ fontSize: 12, color: "var(--faint)", fontWeight: 500 }}
+          >
+            {totals?.projectCount ?? projects.length} projects
+          </span>
+        </div>
+        {projects.map((p, i) => (
+          <ProjectRow key={p.id} p={p} last={i === projects.length - 1} />
+        ))}
+      </Card>
     </div>
-  )
+  );
 }

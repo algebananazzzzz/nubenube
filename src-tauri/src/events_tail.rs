@@ -1,8 +1,8 @@
-//! Tails ~/.claude/hooks/nube/events.jsonl and feeds
-//! SessionStart/UserPromptSubmit/Stop/SessionEnd events into the drift state
-//! machine. Decoupled from Claude Code (events
-//! queue on disk even while the app is closed); we start reading at EOF so only
-//! NEW events fire.
+//! Tails ~/.claude/hooks/nube/events.jsonl and feeds the hook events
+//! (start / reengage / stop / end, plus the mid-turn `wait` from
+//! PreToolUse[AskUserQuestion] + Notification) into the drift state machine.
+//! Decoupled from Claude Code (events queue on disk even while the app is
+//! closed); we start reading at EOF so only NEW events fire.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -73,6 +73,7 @@ pub fn start(_app: AppHandle, runtime: Arc<Mutex<DriftRuntime>>) {
                             Some("start") => rt.handle_start(&sid, &cwd),
                             Some("reengage") => rt.handle_reengage(&sid, &cwd),
                             Some("stop") => rt.handle_stop(&sid, &cwd),
+                            Some("wait") => rt.handle_wait(&sid, &cwd),
                             Some("end") => rt.handle_end(&sid),
                             _ => {}
                         }

@@ -117,8 +117,8 @@ mod tests {
         let status = db::connection_stats(&conn, vec![], false);
 
         eprintln!(
-            "\nNUBE-VERIFY  new_msgs={}  projects={}  sessions={}  dedup_ratio={:?}",
-            new, projects.len(), status.sessions_scanned, status.naive_dedup_ratio
+            "\nNUBE-VERIFY  new_msgs={}  projects={}  sessions={}",
+            new, projects.len(), status.sessions_scanned
         );
         eprintln!(
             "  lifetime water = {:.1} L  | input={} output={} cacheCreate={} cacheRead={}",
@@ -129,19 +129,12 @@ mod tests {
             totals.tokens.cache_read
         );
         for p in projects.iter().take(10) {
-            eprintln!(
-                "   - {:<30} {:>10.1} L  msgs={:>6}",
-                p.name,
-                p.water_ml / 1000.0,
-                p.msg_count
-            );
+            eprintln!("   - {:<30} {:>10.1} L", p.name, p.water_ml / 1000.0);
         }
 
         if status.sessions_scanned > 0 {
             assert!(!projects.is_empty(), "expected at least one project");
             assert!(totals.tokens.cache_read > 0, "cache_read should dominate the mass");
-            let r = status.naive_dedup_ratio.unwrap_or(0.0);
-            assert!(r > 1.0 && r < 6.0, "dedup ratio {r} outside expected band");
         }
         let _ = std::fs::remove_file(&tmp);
     }

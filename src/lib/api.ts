@@ -6,11 +6,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
   ConnectionStatus,
-  DayPoint,
   FocusTick,
   Insights,
   KnownApp,
   Project,
+  ProjectDetail,
   RangeKey,
   Settings,
   Totals,
@@ -18,7 +18,8 @@ import type {
 import {
   mockConnection,
   mockInsights,
-  mockProjectByDay,
+  mockKnownApps,
+  mockProjectDetail,
   mockProjects,
   mockSettings,
   mockTotals,
@@ -41,8 +42,6 @@ async function call<T>(cmd: string, args: Record<string, unknown>, fallback: () 
   return { data: fallback(), live: false }
 }
 
-export type ProjectDetail = { project: Project; byDay: DayPoint[] }
-
 export const api = {
   getProjects: () => call<Project[]>('get_projects', {}, () => mockProjects),
   getTotals: () => call<Totals>('get_totals', {}, () => mockTotals),
@@ -55,17 +54,10 @@ export const api = {
     call<ConnectionStatus>('install_hooks', {}, () => ({ ...mockConnection, hooksInstalled: true })),
   uninstallHooks: () =>
     call<ConnectionStatus>('uninstall_hooks', {}, () => ({ ...mockConnection, hooksInstalled: false })),
-  requestPermission: (kind: 'screenRecording' | 'automation') =>
-    call<ConnectionStatus>('request_permission', { kind }, () => mockConnection),
-  getProjectDetail: (id: string) =>
-    call<ProjectDetail>('get_project_detail', { id }, () => ({
-      project: mockProjects.find((p) => p.id === id) ?? mockProjects[0],
-      byDay: mockProjectByDay(id),
-    })),
-  resetToday: () => call<void>('reset_today', {}, () => undefined),
-  getKnownApps: () => call<KnownApp[]>('get_known_apps', {}, () => []),
-  listRunningApps: () => call<string[]>('list_running_apps', {}, () => []),
-  exportData: () => call<string>('export_data', {}, () => JSON.stringify({ projects: mockProjects }, null, 2)),
+  getProjectDetail: (id: string, range: RangeKey) =>
+    call<ProjectDetail | null>('get_project_detail', { id, range }, () => mockProjectDetail(id, range)),
+  getKnownApps: () => call<KnownApp[]>('get_known_apps', {}, () => mockKnownApps),
+  listRunningApps: () => call<string[]>('list_running_apps', {}, () => mockKnownApps.map((a) => a.name)),
 }
 
 async function subscribe<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {
@@ -79,6 +71,5 @@ async function subscribe<T>(event: string, cb: (payload: T) => void): Promise<Un
 
 export const events = {
   onFocusTick: (cb: (t: FocusTick) => void) => subscribe<FocusTick>('focus-tick', cb),
-  onUsageUpdated: (cb: () => void) => subscribe<unknown>('usage-updated', () => cb()),
   onDriftMoment: (cb: (t: FocusTick) => void) => subscribe<FocusTick>('drift-moment', cb),
 }

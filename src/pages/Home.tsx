@@ -1,138 +1,177 @@
-// Home — the live hero. The Nube in its biome + the 70%-base / 30%-earned life
-// model, all driven by the real `focus-tick` (cloudHealth, state, away-timer).
+// Home — a single calm cockpit: the creature, live status, life, and the one
+// action that matters right now. Ported from home.jsx, wired to the live tick.
 
-import { useFocus } from '../store/focus'
+import { useNavigate } from 'react-router-dom'
 import { useUsage } from '../store/usage'
-import { useDemo } from '../store/demo'
-import { NubeCreature } from '../components/NubeCreature'
-import { Sky, Cloud, Sun, Rain, Twinkles, Zzz } from '../components/Biome'
-import { Btn, Dot, LifeBar, INK, SUB, FAINT, shadow, elev } from '../components/ui'
-import { hueClay } from '../lib/clay'
-import {
-  BASE_LIFE,
-  PHASE_META,
-  phaseFromTick,
-  lifeFromHealth,
-  sizeFor,
-  mmss,
-  greeting,
-  type Phase,
-} from '../lib/derive'
-import { rescue } from '../lib/rescue'
-import { isTauri } from '../lib/api'
-import type { Project } from '../types'
+import { api } from '../lib/api'
+import { useNube, statusFor, cueFor, timerFor, type NubeState } from '../lib/derive'
+import { Card, Pill, Btn, Dot, LifeBar, Eyebrow } from '../components/ui'
+import { Sky, Nube } from '../components/NubeCreature'
 
-// Representative life + away-time for the demo dock (browser preview only).
-const DEMO_LIFE: Record<Phase, number> = { working: 90, idle: 70, waiting: 86, draining: 62, critical: 36, fading: 13, faint: 0 }
-const DEMO_SECS: Record<Phase, number> = { working: 0, idle: 0, waiting: 6, draining: 48, critical: 132, fading: 322, faint: 0 }
-
-function homeProject(projects: Project[], activeId?: string): Project | null {
-  if (!projects.length) return null
-  return projects.find((p) => p.id === activeId) ?? [...projects].sort((a, b) => b.waterMl - a.waterMl)[0]
+// ── live drift countdown — the urgency driver ──────────────────
+function Countdown({ s, compact }: { s: NubeState; compact?: boolean }) {
+  if (s.remaining == null) return null
+  const crit = s.life < 30
+  const tone = crit ? 'var(--critical)' : 'var(--warning)'
+  const surf = crit ? 'var(--critical-surface)' : 'var(--warning-surface)'
+  const bd = crit ? 'var(--critical-border)' : 'var(--warning-border)'
+  return (
+    <div style={{ background: surf, border: `1px solid ${bd}`, borderRadius: 'var(--r-md)', padding: compact ? '9px 11px' : '11px 13px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: compact ? 10 : 10.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: tone }}>
+          <Dot tone={tone} size={6} pulse /> {s.fainting ? 'Nube has fainted' : 'Nube faints in'}
+        </span>
+        <span className="nn-num" style={{ fontSize: compact ? 16 : 21, fontWeight: 700, color: tone, lineHeight: 1 }}>{s.fmtCountdown(s.remaining)}</span>
+      </div>
+      <div style={{ marginTop: compact ? 7 : 9, height: compact ? 4 : 5, borderRadius: 999, background: 'var(--surface-strong)', overflow: 'hidden' }}>
+        <div style={{ width: `${s.countdownPct * 100}%`, height: '100%', background: tone, borderRadius: 999, transition: 'width 1s linear' }} />
+      </div>
+    </div>
+  )
 }
 
-export function Home() {
-  const tick = useFocus((s) => s.tick)
-  const projects = useUsage((s) => s.projects)
-  const demoPhase = useDemo((s) => s.phase)
+function PauseButton({ s, size = 'md', full }: { s: NubeState; size?: 'sm' | 'md' | 'lg'; full?: boolean }) {
+  return (
+    <Btn variant={s.paused ? 'primary' : 'line'} size={size} full={full} onClick={s.togglePause} style={{ gap: 8 }}>
+      {s.paused
+        ? <svg width="12" height="13" viewBox="0 0 13 14" fill="currentColor"><path d="M2 1.2v11.6a.6.6 0 0 0 .92.5l9-5.8a.6.6 0 0 0 0-1l-9-5.8A.6.6 0 0 0 2 1.2z" /></svg>
+        : <svg width="11" height="13" viewBox="0 0 12 14" fill="currentColor"><rect x="1" y="1" width="3.6" height="12" rx="1.2" /><rect x="7.4" y="1" width="3.6" height="12" rx="1.2" /></svg>}
+      {s.paused ? 'Resume tracking' : 'Pause'}
+    </Btn>
+  )
+}
 
-  const phase: Phase = demoPhase ?? phaseFromTick(tick)
-  const meta = PHASE_META[phase]
-  const project = homeProject(projects, tick.activeProjectId)
-  const hue = project?.colorHue ?? 268
-  const c = hueClay(hue)
-  const name = project?.name ?? tick.activeProjectName ?? 'your project'
-
-  const maxW = Math.max(...projects.map((p) => p.waterMl), 1)
-  const water = project?.waterMl ?? maxW
-  const scale = sizeFor(water, maxW)
-
-  const life = demoPhase ? DEMO_LIFE[phase] : lifeFromHealth(tick.cloudHealth)
-  const secs = demoPhase ? DEMO_SECS[phase] : tick.secondsSinceClaudeFinished ?? 0
-  const waiting = demoPhase ? 0 : tick.waitingSessions ?? 0
-  const above = life >= BASE_LIFE
-  const earned = Math.max(0, life - BASE_LIFE)
-  const urgent = phase === 'draining' || phase === 'critical' || phase === 'fading'
-  const lifeCol = urgent || phase === 'faint' ? 'var(--danger)' : c.ink
-
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-
-  const onAct = () => { if (isTauri) void rescue.openMain().catch(() => {}) }
+// ── the unified live cockpit ────────────────────────────────────
+function HeroCockpit() {
+  const s = useNube()
+  const navigate = useNavigate()
+  const st = statusFor(s.effState, s.appName)
+  const cue = cueFor(s)
+  const over = s.life - s.baseline
+  const lifeTone = s.paused ? 'var(--faint)' : s.life >= 100 ? 'var(--success)' : s.life < 30 ? 'var(--critical)' : 'var(--warning)'
+  const deltaPill = s.paused
+    ? <Pill kind="neutral" style={{ fontSize: 11.5 }}>frozen</Pill>
+    : over >= 0
+      ? <Pill tone="mint" style={{ fontSize: 11.5 }}>+{Math.round(over)}% banked</Pill>
+      : <Pill tone={s.life < 30 ? 'danger' : 'amber'} style={{ fontSize: 11.5 }}>{Math.round(over)}% below start</Pill>
 
   return (
-    <div className="nn-ui" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 14, padding: '20px 22px', overflow: 'hidden' }}>
-      {/* header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <div className="nn-disp" style={{ fontWeight: 800, fontSize: 23, color: INK, lineHeight: 1, letterSpacing: '-.01em' }}>{greeting()}</div>
-          <div style={{ fontWeight: 600, fontSize: 12.5, color: SUB, marginTop: 4, whiteSpace: 'nowrap' }}>
-            {today} · your home bloop is <b style={{ color: c.ink }}>{name}</b>
-          </div>
-        </div>
-      </div>
-
-      {/* hero biome */}
-      <div style={{ position: 'relative', flex: 1, minHeight: 0, borderRadius: 20, overflow: 'hidden', border: elev.border, boxShadow: shadow.md }}>
-        <Sky state={meta.sky}>
-          {phase === 'working' && <Sun x={'76%'} y={24} size={62} />}
-          <Cloud x={-26} y={36} scale={0.66} health={phase === 'faint' ? 0.4 : 1} dur={18} anim="drift1" />
-          <Cloud x={'68%'} y={'58%'} scale={0.56} health={phase === 'faint' ? 0.4 : 1} dur={24} delay={2} anim="drift2" />
-          {phase === 'working' && <Twinkles count={8} area={{ w: 760, h: 340 }} />}
-          {meta.distract && <Rain count={phase === 'fading' ? 22 : phase === 'critical' ? 16 : 10} area={{ w: 760, h: 300 }} color={c.mid} />}
-          <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-52%)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <NubeCreature mood={meta.mood} hue={hue} size={phase === 'faint' ? 200 : 184} scale={scale} />
-            {phase === 'idle' && <Zzz x={118} y={-148} />}
+    <Card pad={0} style={{ overflow: 'hidden', display: 'flex', minHeight: 312 }}>
+      {/* left — the creature in its calm panel */}
+      <div style={{ position: 'relative', width: '40%', minWidth: 260, flexShrink: 0, borderRight: '1px solid var(--line-faint)' }}>
+        <Sky sky={s.sky} style={{ position: 'absolute', inset: 0 }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Nube mood={s.mood} size={172} />
           </div>
         </Sky>
-
-        {/* status strip */}
-        <div style={{ position: 'absolute', left: 16, top: 14, display: 'inline-flex', alignItems: 'center', gap: 9, background: 'rgba(255,255,255,.86)', backdropFilter: 'blur(10px)', borderRadius: 99, padding: '7px 14px 7px 11px', boxShadow: shadow.sm, border: '1px solid rgba(255,255,255,.6)' }}>
-          <Dot color={meta.dot} pulse={urgent} />
-          <span className="nn-disp" style={{ fontWeight: 700, fontSize: 13, color: INK, whiteSpace: 'nowrap' }}>{meta.head}</span>
-          {waiting > 1 && (
-            <span style={{ fontWeight: 700, fontSize: 11, color: SUB, background: 'rgba(120,100,170,.12)', borderRadius: 99, padding: '2px 8px', whiteSpace: 'nowrap' }}>{waiting} waiting</span>
-          )}
-        </div>
-
-        {/* away timer */}
-        {(urgent || phase === 'waiting') && (
-          <div style={{ position: 'absolute', right: 14, top: 12, textAlign: 'right', background: 'rgba(255,255,255,.84)', backdropFilter: 'blur(10px)', borderRadius: 14, padding: '7px 13px', boxShadow: shadow.sm, border: '1px solid rgba(255,255,255,.6)' }}>
-            <div style={{ fontWeight: 700, fontSize: 9.5, color: SUB, letterSpacing: '.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{phase === 'waiting' ? 'waiting' : 'away from Claude'}</div>
-            <div className="nn-num" style={{ fontWeight: 800, fontSize: 24, lineHeight: 1.05, color: urgent ? 'var(--danger)' : c.ink }}>{mmss(secs)}</div>
+        {s.paused && (
+          <div style={{ position: 'absolute', bottom: 14, left: 0, right: 0, textAlign: 'center' }}>
+            <span className="nn-eyebrow" style={{ fontSize: 10, letterSpacing: '.2em', color: 'var(--faint)' }}>paused</span>
           </div>
         )}
       </div>
 
-      {/* life panel */}
-      <div style={{ padding: '16px 20px', background: 'var(--surface)', borderRadius: 16, border: elev.border, boxShadow: shadow.md }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <span style={{ fontWeight: 700, fontSize: 10.5, color: FAINT, letterSpacing: '.06em', textTransform: 'uppercase' }}>life today</span>
-            <span className="nn-num" style={{ fontWeight: 800, fontSize: 28, lineHeight: 1, color: lifeCol }}>
-              {Math.round(life)}
-              <span style={{ fontSize: 16 }}>%</span>
-            </span>
-          </div>
-          {meta.cta && (
-            <Btn hue={urgent ? 26 : hue} size="sm" onClick={onAct}>
-              {meta.cta}
-            </Btn>
-          )}
+      {/* right — facts + action */}
+      <div style={{ flex: 1, minWidth: 0, padding: '22px 24px', display: 'flex', flexDirection: 'column' }}>
+        {/* one status line: tone dot + the state word (no duplicate chip) + caption */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Dot tone={st.tone} pulse={st.pulse} size={9} />
+          <span className="nn-disp" style={{ fontSize: 21, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cue.title}</span>
+          <span style={{ flex: 1 }} />
+          {s.remaining == null && timerFor(s) && <span className="nn-mono" style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--faint)', whiteSpace: 'nowrap', flexShrink: 0 }}>{timerFor(s)}</span>}
         </div>
-        <LifeBar life={life} base={BASE_LIFE} hue={hue} draining={urgent} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 11 }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 9, height: 9, borderRadius: 3, background: above ? c.mid : 'rgba(150,130,180,.4)' }} />
-            <span style={{ fontWeight: 700, fontSize: 11.5, color: SUB }}>base {BASE_LIFE}%</span>
-          </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 9, height: 9, borderRadius: 3, background: above ? c.deep : '#ea7458' }} />
-            <span style={{ fontWeight: 700, fontSize: 11.5, color: SUB }}>{above ? `earned +${Math.round(earned)}%` : `${Math.round(BASE_LIFE - life)}% below base`}</span>
-          </span>
-          <span style={{ marginLeft: 'auto', fontWeight: 600, fontSize: 11, color: FAINT }}>work earns up to +30%</span>
+
+        <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.5, marginTop: 8, textWrap: 'pretty' }}>{cue.line}</div>
+
+        {s.remaining != null && <div style={{ marginTop: 14 }}><Countdown s={s} /></div>}
+
+        <div style={{ flex: 1, minHeight: 14 }} />
+
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, marginBottom: 8 }}>
+          <Eyebrow style={{ fontSize: 10.5 }}>Nube's life</Eyebrow>
+          <span style={{ flex: 1 }} />
+          {deltaPill}
         </div>
-        <div style={{ fontWeight: 600, fontSize: 12, color: urgent ? '#c9633c' : SUB, marginTop: 9 }}>{meta.sub}</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+          <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: lifeTone, lineHeight: .9 }}>{Math.round(s.life)}</span>
+          <span className="nn-num" style={{ fontSize: 18, fontWeight: 600, color: 'var(--faint)' }}>%</span>
+        </div>
+        <div style={{ marginTop: 12 }}><LifeBar life={s.life} baseline={s.baseline} cap={s.cap} height={10} /></div>
+
+        <div style={{ display: 'flex', gap: 9, marginTop: 18 }}>
+          <PauseButton s={s} />
+          <Btn variant="ghost" onClick={() => navigate('/insights')}>View insights</Btn>
+        </div>
       </div>
+    </Card>
+  )
+}
+
+// ── "today" live timers ─────────────────────────────────────────
+function TimerTile({ label, value, tone, badge, fmt }: { label: string; value: number; tone: string; badge?: string | null; fmt: (s: number) => string }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0, padding: '13px 14px', borderRadius: 'var(--r-md)', background: 'var(--surface-faint)', border: '1px solid var(--line-faint)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Dot tone={tone} size={6} />
+        <span style={{ fontSize: 11.5, color: 'var(--faint)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+        {badge && <span className="nn-num" style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: tone, padding: '1px 5px', borderRadius: 999, background: 'var(--surface-strong)' }}>{badge}</span>}
+      </div>
+      <div className="nn-num" style={{ fontSize: 21, fontWeight: 700, color: 'var(--ink)', marginTop: 8, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{fmt(value)}</div>
+    </div>
+  )
+}
+
+function TodayStrip() {
+  const s = useNube()
+  return (
+    <Card pad={20}>
+      <Eyebrow style={{ fontSize: 10.5 }}>Today</Eyebrow>
+      <div style={{ display: 'flex', gap: 10, marginTop: 13 }}>
+        <TimerTile label="Claude working" value={s.work} tone="var(--success)" badge={s.run > 1 ? `×${s.run}` : null} fmt={s.fmtCountdown} />
+        <TimerTile label="Distracted" value={s.distracted} tone="var(--warning)" fmt={s.fmtCountdown} />
+        <TimerTile label="Monitored" value={s.monitored} tone="var(--faint)" fmt={s.fmtCountdown} />
+      </div>
+    </Card>
+  )
+}
+
+// ── empty / first-run Home ──────────────────────────────────────
+function HomeEmpty() {
+  const s = useNube()
+  const loadAll = useUsage((st) => st.loadAll)
+  const connect = () => { void api.installHooks().then(() => loadAll()) }
+  return (
+    <Card pad={0} style={{ overflow: 'hidden' }}>
+      <div style={{ position: 'relative', height: 200, borderBottom: '1px solid var(--line-faint)' }}>
+        <Sky sky={s.sky} style={{ position: 'absolute', inset: 0 }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Nube mood="content" size={150} />
+          </div>
+        </Sky>
+      </div>
+      <div style={{ padding: '24px 26px', textAlign: 'center' }}>
+        <div className="nn-disp" style={{ fontSize: 20, color: 'var(--ink)', marginBottom: 8 }}>Hi, I'm Nube</div>
+        <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.55, maxWidth: '44ch', margin: '0 auto 20px' }}>
+          Connect Claude Code and I'll grow while it works for you — and nudge you the moment it's your turn.
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+          <Btn variant="primary" onClick={connect}>Connect Claude Code</Btn>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+export function Home() {
+  const projects = useUsage((s) => s.projects)
+  const connection = useUsage((s) => s.connection)
+  const loaded = useUsage((s) => s.loaded)
+  const empty = loaded && projects.length === 0 && !connection?.connected
+  if (empty) return <HomeEmpty />
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <HeroCockpit />
+      <TodayStrip />
     </div>
   )
 }

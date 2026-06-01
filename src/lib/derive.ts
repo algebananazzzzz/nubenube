@@ -1,177 +1,203 @@
-// derive.ts — the bridge between the REAL backend data (src/types.ts, emitted by
-// the Rust drift/connector layer) and the prototype's visual states. This is what
-// makes the candy UI run on live data instead of mocks.
+// derive.ts — the bridge between the REAL backend data (the Rust drift/connector
+// layer, src/types.ts) and the Helios design's visual states. `useNube()`
+// composes the live FocusTick + theme pref into the exact shape the ported
+// design components expect (the prototype's `useNN()` store).
 
-import type { FocusTick, Project, TokenBreakdown } from '../types'
-import { hueClay } from './clay'
+import { useFocus } from '../store/focus'
+import { usePrefs, type Theme } from '../store/prefs'
+import { useCountdown, useCountUp } from './useCountdown'
+import { rescue } from './rescue'
+import { hueClay, moodDrain, DEFAULT_HUE, type Clay } from './clay'
+import type { FocusState, FocusTick } from '../types'
 
-// ── shared visual vocabularies (NubeCreature + Biome import these) ──
-export type NubeMood =
-  | 'thriving'
-  | 'content'
-  | 'alert'
-  | 'worried'
-  | 'gasping'
-  | 'fading'
-  | 'faint'
+export const BASELINE = 100
+export const CAP = 130
 
-export type SkyState =
-  | 'calm'
-  | 'working'
-  | 'alert'
-  | 'worried'
-  | 'danger'
-  | 'fading'
-  | 'faint'
-  | 'mint'
+export type Mood = 'thriving' | 'content' | 'alert' | 'worried' | 'gasping' | 'fading' | 'faint'
+export type Sky = 'good' | 'working' | 'alert' | 'worried' | 'danger' | 'calm' | 'idle' | 'fading' | 'faint'
 
-// The live "home" phase. Derived from a FocusTick; drives Home, Companion.
-export type Phase = 'working' | 'idle' | 'waiting' | 'draining' | 'critical' | 'fading' | 'faint'
-
-export const BASE_LIFE = 70 // cloudHealth resets daily to 0.70 → 70% base life
-
-/** Indefinite pause marker stored in Settings.pauseUntil; resume clears it to null. */
-export const PAUSE_SENTINEL = '9999-12-31T23:59:59Z'
-
-type PhaseMeta = {
-  mood: NubeMood
-  sky: SkyState
-  dot: string
-  head: string
-  sub: string
-  cta: string | null
-  distract: boolean
-  glow: number // hue used for ambient accenting
+// ── derivation ──────────────────────────────────────────────────
+// Mood comes from LIFE (not the clock). cap = 130, baseline = 100.
+export function deriveMood(life: number, cap = CAP): Mood {
+  if (life >= 0.95 * cap) return 'thriving'
+  if (life >= 100) return 'content'
+  if (life >= 80) return 'alert'
+  if (life >= 55) return 'worried'
+  if (life >= 30) return 'gasping'
+  if (life >= 8) return 'fading'
+  return 'faint'
 }
 
-export const PHASE_META: Record<Phase, PhaseMeta> = {
-  working: {
-    mood: 'thriving', sky: 'working', dot: '#54c489', glow: 158, distract: false,
-    head: 'In flow — Nube is thriving', sub: 'every focused minute feeds Nube — life is climbing', cta: null,
-  },
-  idle: {
-    mood: 'content', sky: 'calm', dot: '#a18fd6', glow: 268, distract: false,
-    head: 'All calm — Nube is napping', sub: 'resting at base life · do some work to earn more', cta: null,
-  },
-  waiting: {
-    mood: 'alert', sky: 'alert', dot: '#6f9be0', glow: 210, distract: false,
-    head: 'Claude finished — Nube is waiting', sub: 'hop back before its earned life drains away', cta: "I'm back",
-  },
-  draining: {
-    mood: 'worried', sky: 'worried', dot: '#e0a23a', glow: 44, distract: true,
-    head: 'You drifted away', sub: 'Nube is weeping — already losing life', cta: 'Back to Claude',
-  },
-  critical: {
-    mood: 'gasping', sky: 'danger', dot: '#ec7a4a', glow: 26, distract: true,
-    head: 'Nube is gasping for focus', sub: '2+ min away · shrinking fast', cta: 'Rescue Nube',
-  },
-  fading: {
-    mood: 'fading', sky: 'fading', dot: '#d07a6a', glow: 12, distract: true,
-    head: 'Nube is drying to a tadpole', sub: '5+ min away · almost gone', cta: 'Save Nube now',
-  },
-  faint: {
-    mood: 'faint', sky: 'faint', dot: '#9a93a8', glow: 268, distract: false,
-    head: 'Nube has fainted', sub: 'revive by getting back to work (~10 min of focus)', cta: 'Start a focus session',
-  },
-}
-
-/** Map a live FocusTick onto one of the seven phases.
-    Per the product intent, the urgent states only happen when you've drifted to a
-    *distraction* app while Claude waits — never while you're at your desk or on a break. */
-export function phaseFromTick(t: FocusTick): Phase {
-  const h = t.cloudHealth ?? BASE_LIFE / 100
-  if (h <= 0.02) return 'faint'
-  const ss = t.secondsSinceClaudeFinished ?? null
-  switch (t.state) {
-    case 'drifting':
-      if (ss != null && ss >= 300) return 'fading'
-      if (ss != null && ss >= 120) return 'critical'
-      return 'draining'
-    case 'waiting':
-      return 'waiting'
-    case 'paused':
-    case 'idle':
-      return 'idle'
-    case 'growing':
-      return 'working'
-    default:
-      return 'idle' // 'unknown' / any future state → safe resting default
+// "sky" → the calm tinted panel behind the creature
+export function deriveSky(life: number, state: FocusState): Sky {
+  if (life < 8) return 'faint'
+  if (life < 30) return 'fading'
+  switch (state) {
+    case 'vibing': return life >= 100 ? 'good' : 'working'
+    case 'waiting': return 'alert'
+    case 'drifting': return life < 55 ? 'danger' : 'worried'
+    case 'chillin': return 'alert' // on a distraction, but nothing's blocked
+    case 'paused': return 'calm'
+    default: return 'idle'
   }
 }
 
-export function lifeFromHealth(h: number): number {
-  return Math.max(0, Math.min(100, Math.round((h ?? 0) * 100)))
-}
-/** Life earned above the daily base (0..30). */
-export function earnedFromHealth(h: number): number {
-  return Math.max(0, lifeFromHealth(h) - BASE_LIFE)
-}
-/** How far below base life the Nube has drained (0..70). */
-export function belowBaseFromHealth(h: number): number {
-  return Math.max(0, BASE_LIFE - lifeFromHealth(h))
+export const MOOD_LABEL: Record<Mood, string> = {
+  thriving: 'Thriving', content: 'Content', alert: 'Perky',
+  worried: 'Worried', gasping: 'Gasping', fading: 'Fading', faint: 'Faint',
 }
 
-/** Lifetime water → bloop scale multiplier (sqrt curve, like the prototype). */
-export function sizeFor(waterMl: number, maxWaterMl: number): number {
-  const t = Math.min(1, Math.max(0, waterMl / (maxWaterMl || 1)))
-  return 0.62 + 0.44 * Math.sqrt(t)
+// ── formatters ──────────────────────────────────────────────────
+export function fmtClock(secs: number): string {
+  secs = Math.max(0, Math.round(secs))
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  const s = secs % 60
+  if (h) return `${h}h ${String(m).padStart(2, '0')}m`
+  if (m) return `${m}m ${String(s).padStart(2, '0')}s`
+  return `${s}s`
 }
 
-/** A project's resting mood, from its (daily-resetting) cloudHealth. */
-export function moodFromHealth(h: number): NubeMood {
-  if (h <= 0.02) return 'faint'
-  if (h < 0.2) return 'fading'
-  if (h < 0.4) return 'gasping'
-  if (h < 0.58) return 'worried'
-  if (h < 0.78) return 'content'
-  return 'thriving'
+export function fmtMin(secs: number): string {
+  const m = Math.round(secs / 60)
+  if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m`
+  return `${m}m`
 }
 
-export type ProjectStatus = { mood: NubeMood; dot: string; label: string; attn: boolean }
-
-/** Status chip + dot for a project card / row. */
-export function projectStatus(p: Project): ProjectStatus {
-  const h = p.cloudHealth
-  if (h <= 0.05) return { mood: 'faint', dot: '#cf8a4a', label: 'fainted', attn: true }
-  if (h >= 0.82) return { mood: 'thriving', dot: '#54c489', label: 'thriving', attn: false }
-  if (h < 0.4) return { mood: moodFromHealth(h), dot: '#e0a23a', label: 'needs you', attn: true }
-  return { mood: moodFromHealth(h), dot: '#a18fd6', label: 'resting', attn: false }
+// digital countdown — M:SS (or H:MM:SS)
+export function fmtCountdown(secs: number): string {
+  secs = Math.max(0, Math.round(secs))
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  const s = secs % 60
+  if (h) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  return `${m}:${String(s).padStart(2, '0')}`
 }
 
-export type TokenSeg = { key: keyof TokenBreakdown; label: string; value: number; color: string }
+// ── status / cue / timer ────────────────────────────────────────
+export type Status = { label: string; tone: string; toneKind: string; pulse: boolean }
 
-/** Token composition → donut/legend segments. `value` is in MILLIONS of tokens.
-    Note the prototype's "cache write" == the backend's `cacheCreate`. */
-export function tokenSegs(t: TokenBreakdown, hue: number): TokenSeg[] {
-  const c = hueClay(hue)
-  const M = (n: number) => (n || 0) / 1e6
-  return [
-    { key: 'cacheRead', label: 'cache read', value: M(t.cacheRead), color: c.deep },
-    { key: 'input', label: 'input', value: M(t.input), color: c.mid },
-    { key: 'output', label: 'output', value: M(t.output), color: c.light },
-    { key: 'cacheCreate', label: 'cache write', value: M(t.cacheCreate), color: `hsl(${hue} 30% 84%)` },
-  ]
-}
-
-export const sumTokenM = (t: TokenBreakdown): number =>
-  ((t.input || 0) + (t.output || 0) + (t.cacheCreate || 0) + (t.cacheRead || 0)) / 1e6
-
-/** Clock for the away-from-Claude timer. m:ss under an hour, h:mm:ss above. */
-export function mmss(secs: number): string {
-  const s = Math.max(0, Math.round(secs))
-  const sec = s % 60
-  if (s >= 3600) {
-    const h = Math.floor(s / 3600)
-    const m = Math.floor((s % 3600) / 60)
-    return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+// Labels are the user's own state words — never invented synonyms. The two
+// distraction states append the app name (the overlay must name where you are).
+export function statusFor(state: FocusState, appName: string | null): Status {
+  const app = appName || 'a distraction'
+  switch (state) {
+    case 'vibing': return { label: 'Vibing', tone: 'var(--success)', toneKind: 'mint', pulse: true }
+    case 'waiting': return { label: 'Waiting', tone: 'var(--accent)', toneKind: 'accent', pulse: true }
+    case 'drifting': return { label: `Drifting · ${app}`, tone: 'var(--critical)', toneKind: 'danger', pulse: true }
+    case 'chillin': return { label: `Chillin · ${app}`, tone: 'var(--teal)', toneKind: 'teal', pulse: false }
+    case 'paused': return { label: 'Paused', tone: 'var(--calm)', toneKind: 'calm', pulse: false }
+    default: return { label: 'Idle', tone: 'var(--faint)', toneKind: 'neutral', pulse: false }
   }
-  return `${Math.floor(s / 60)}:${String(sec).padStart(2, '0')}`
 }
 
-/** Local time-of-day greeting for Home. */
-export function greeting(d = new Date()): string {
-  const h = d.getHours()
-  if (h < 12) return 'good morning'
-  if (h < 18) return 'good afternoon'
-  return 'good evening'
+// the one line the user should read first — what to do right now
+// Title is always the user's state word; the line just explains what's happening.
+export function cueFor(s: NubeState): { title: string; line: string } {
+  const app = s.appName || 'a distraction'
+  switch (s.effState) {
+    case 'paused': return { title: 'Paused', line: 'Tracking is off — nothing counts until you resume.' }
+    case 'drifting': return { title: `Drifting · ${app}`, line: `Claude is waiting while you're on ${app} — Nube is draining.` }
+    case 'chillin': return { title: `Chillin · ${app}`, line: `You're on ${app}. Nothing is waiting, so Nube is fine.` }
+    case 'waiting': return { title: 'Waiting', line: 'Claude finished and is waiting on you.' }
+    case 'vibing': return { title: 'Vibing', line: 'Claude is working for you — Nube is banking life.' }
+    default: return { title: 'Idle', line: 'No Claude sessions right now.' }
+  }
+}
+
+// Secondary caption: a metric (count / time), not an alternate state word —
+// the state name is already the title.
+export function timerFor(s: NubeState): string {
+  if (s.paused) return 'frozen'
+  if (s.effState === 'drifting') return `${fmtClock(s.secondsToDeath ?? 0)} left`
+  if (s.effState === 'vibing') return `${s.run} running`
+  if (s.effState === 'waiting') return `${s.wait} waiting`
+  return ''
+}
+
+// ── the composed live store the design components read ──────────
+export type NubeState = {
+  tick: FocusTick
+  theme: Theme
+  hue: number
+  life: number
+  baseline: number
+  cap: number
+  effState: FocusState
+  appName: string | null
+  run: number
+  wait: number
+  active: number // today's at-machine seconds (includes the distract subset)
+  distract: number // today's seconds on a distraction app
+  focused: number // active − distract
+  focusPct: number // focused / active
+  // live (ticking) "today" totals for the Home timers:
+  work: number // session-weighted Claude-working secs (faster with more windows)
+  distracted: number // seconds on a distraction (states 3+4)
+  monitored: number // present-&-tracking seconds (all but paused/away)
+  frozen: boolean // meter frozen (paused or away/idle)
+  paused: boolean
+  togglePause: () => void
+  mood: Mood
+  moodLabel: string
+  sky: Sky
+  clay: Clay
+  losing: boolean
+  secondsToDeath: number | null
+  remaining: number | null
+  countdownPct: number
+  fainting: boolean
+  fmtClock: typeof fmtClock
+  fmtMin: typeof fmtMin
+  fmtCountdown: typeof fmtCountdown
+}
+
+export function useNube(): NubeState {
+  const tick = useFocus((s) => s.tick)
+  const theme = usePrefs((s) => s.theme)
+
+  const life = tick.cloudHealth
+  const baseline = tick.baseline || BASELINE
+  const cap = tick.cap || CAP
+  const effState = tick.state
+  const paused = effState === 'paused'
+  const appName = tick.appName?.trim() ? tick.appName.trim() : null
+  const run = tick.runningSessions ?? 0
+  const wait = tick.waitingSessions ?? 0
+  const active = tick.activeSecsToday ?? 0
+  const distract = tick.distractSecsToday ?? 0
+  const focused = Math.max(0, active - distract)
+  const focusPct = active > 0 ? focused / active : 0
+  const hue = tick.colorHue || DEFAULT_HUE
+
+  const { satMul, ltAdd } = moodDrain(life)
+  const clay = hueClay(hue, satMul, ltAdd)
+  const mood: Mood = paused
+    ? (life >= 100 ? 'content' : life >= 55 ? 'worried' : 'fading')
+    : deriveMood(life, cap)
+  const sky = paused ? 'calm' : deriveSky(life, effState)
+
+  const secondsToDeath = tick.secondsToDeath ?? null
+  const losing = !paused && effState === 'drifting' && secondsToDeath != null
+  const remaining = useCountdown(losing ? secondsToDeath : null, losing)
+  const countdownPct = losing && secondsToDeath ? Math.max(0, (remaining ?? 0) / secondsToDeath) : 0
+  const fainting = remaining != null && remaining <= 0
+
+  // live "today" timers — anchored to the backend totals, ticking locally each
+  // second while their state is active (so the Home clocks count smoothly).
+  const frozen = tick.frozen ?? paused
+  const onDistraction = effState === 'drifting' || effState === 'chillin'
+  const work = useCountUp(tick.workSecsToday ?? 0, !frozen ? run : 0) // +run/sec
+  const distracted = useCountUp(distract, onDistraction ? 1 : 0)
+  const monitored = useCountUp(tick.monitoredSecsToday ?? 0, !frozen ? 1 : 0)
+
+  return {
+    tick, theme, hue, life, baseline, cap, effState, appName,
+    run, wait, active, distract, focused, focusPct,
+    work, distracted, monitored, frozen,
+    paused, togglePause: () => { void rescue.setPaused(!paused) },
+    mood, moodLabel: MOOD_LABEL[mood], sky, clay,
+    losing, secondsToDeath, remaining, countdownPct, fainting,
+    fmtClock, fmtMin, fmtCountdown,
+  }
 }

@@ -1,20 +1,24 @@
 // prefs.ts — UI-only preferences kept in localStorage (shared across all the
-// app's windows since they share an origin). These are the bits the prototype's
-// Settings exposed that don't map to the Rust-backed Settings struct: which
-// full-screen rescues fire, reminder cadence, sound, and the companion toggle.
+// app's windows since they share an origin). Theme, sound, and the companion
+// toggles. Changes propagate to the other window (main ↔ companion) via the
+// `storage` event so a theme flip on Settings re-themes the floating companion.
 
 import { create } from 'zustand'
 
+export type Theme = 'dark' | 'light'
+
 export type Prefs = {
+  theme: Theme
   sound: boolean
   companion: boolean
-  introDone: boolean
+  companionMini: boolean
 }
 
 const DEFAULTS: Prefs = {
+  theme: 'dark',
   sound: true,
   companion: true,
-  introDone: false,
+  companionMini: false,
 }
 
 const KEY = 'nn_prefs_v1'
@@ -46,3 +50,16 @@ export const usePrefs = create<PrefsStore>((set) => ({
       return next
     }),
 }))
+
+// Cross-window sync: another window (e.g. the main window's Settings) wrote new
+// prefs → mirror them into this window's store. Fires only in OTHER documents.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== KEY || !e.newValue) return
+    try {
+      usePrefs.setState({ ...DEFAULTS, ...JSON.parse(e.newValue) })
+    } catch {
+      /* ignore */
+    }
+  })
+}

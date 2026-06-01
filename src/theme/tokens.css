@@ -1,77 +1,180 @@
-/* NubeNube design tokens — single light candy-pastel theme.
-   Display/brand + hero numbers: Baloo 2.  UI/body/data: Plus Jakarta Sans.
-   Ported from the Claude Design prototype (ui.jsx / nube.jsx / biome.jsx). */
+/* ─────────────────────────────────────────────────────────────
+   NubeNube · design tokens — Helios edition
+   A flat, calm, infrastructure-grade system inspired by HashiCorp
+   Helios: neutral surfaces, hairline alpha-gray borders, small radii,
+   a single accent (per-project hue, JS-injected) used sparingly, and
+   Helios' semantic status colors (success / warning / critical).
+   Dark is the default theme; light is a true Helios light surface set.
+   ───────────────────────────────────────────────────────────── */
 
 :root {
-  /* ── ink + surfaces ── */
-  --ink: #33304c;
-  --sub: #6f6a8c;
-  --faint: #a39ec0;
-  --canvas: #efeaf7;
-  --surface: #ffffff;
-  --surface-2: #fbf9fe;
-  --line: rgba(70, 52, 130, 0.08);
-  --line-strong: rgba(70, 52, 130, 0.14);
+  --font-ui:   ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-disp: var(--font-ui);
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  /* hero accent (lilac) — most per-element colour is computed via hueClay() */
-  --accent-hue: 268;
+  /* radii — Helios keeps these small and flat */
+  --r-sm: 5px; --r-md: 6px; --r-lg: 8px; --r-xl: 10px; --r-pill: 999px;
 
-  /* drift / danger */
-  --warn: #e0a23a;
-  --danger: #d2683f;
-  --danger-2: #ea7458;
+  /* motion */
+  --ease: cubic-bezier(.3, .7, .4, 1);
+  --ease-soft: cubic-bezier(.32, .72, .3, 1);
 
-  /* ── type ── */
-  --font-disp: 'Baloo 2', system-ui, -apple-system, sans-serif;
-  --font-ui: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  /* ── LIGHT theme — Helios semantic surfaces ─────────────────── */
+  --canvas: #f1f2f3;                 /* desktop / app backdrop (neutral-100) */
+  --page: #ffffff;                   /* page-primary */
+  --page-faint: #fafafa;             /* page-faint */
 
-  /* ── elevation ── */
-  --shadow-sm: 0 1px 2px rgba(48, 42, 82, 0.06);
-  --shadow-md: 0 1px 2px rgba(48, 42, 82, 0.05), 0 10px 26px -20px rgba(70, 52, 130, 0.5);
-  --shadow-lg: 0 2px 4px rgba(48, 42, 82, 0.06), 0 26px 56px -30px rgba(70, 52, 130, 0.6);
-  --border: 1px solid rgba(70, 52, 130, 0.07);
+  --surface:        #ffffff;         /* surface-primary — cards */
+  --surface-faint:  #fafafa;         /* surface-faint — secondary fills */
+  --surface-strong: #eeeefc;         /* surface-strong — insets / tracks */
+  --surface-hover:  #ededfc;         /* surface-interactive-hover */
+  --surface-active: #dcdcf5;         /* surface-interactive-active */
 
-  /* ── radii ── */
-  --r-sm: 10px;
-  --r-md: 14px;
-  --r-lg: 18px;
-  --r-pill: 999px;
+  --ink:   #0c0c0e;                  /* foreground-strong */
+  --text:  #3b3d45;                  /* foreground-primary */
+  --faint: #656a76;                  /* foreground-faint */
+  --disabled: #8c909c;
 
-  /* ── motion ── */
-  --ease: cubic-bezier(0.4, 1.2, 0.5, 1);
+  --line:        #656a7633;          /* border-primary */
+  --line-faint:  #656a761a;          /* border-faint */
+  --line-strong: #3b3d4566;          /* border-strong */
+  --border: 1px solid var(--line);
+
+  --fill-1: #fafafa;
+  --fill-2: #f1f2f3;
+
+  /* status — Helios values (success / warning / critical) */
+  --success:        #008a22; --success-on: #00781e; --success-surface: #f2fbf6; --success-border: #cceeda;
+  --warning:        #bb5a00; --warning-on: #9e4b00; --warning-surface: #fff9e8; --warning-border: #fbeabf;
+  --critical:       #e52228; --critical-on: #c00005; --critical-surface: #fff5f5; --critical-border: #fbd4d4;
+
+  /* convenience aliases used across the app */
+  --mint: var(--success-on);  --mint-soft: var(--success-surface);
+  --amber: var(--warning-on); --amber-soft: var(--warning-surface);
+  --danger: var(--critical-on); --danger-soft: var(--critical-surface);
+
+  /* focus state colors */
+  --teal: #0d9488;   /* chillin — relaxed, off-task but nothing blocked */
+  --calm: #8b85d4;   /* paused  — muted indigo, intentional not alarming */
+
+  /* elevation — Helios is nearly flat; overlays get a small lift */
+  --shadow-sm: 0 1px 2px rgba(12,12,14,.05);
+  --shadow-md: 0 2px 6px rgba(12,12,14,.07);
+  --shadow-lg: 0 8px 28px rgba(12,12,14,.12);
+
+  /* accent fallbacks (indigo) — JS overrides per project + theme */
+  --accent:       #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-text:  #4338ca;
+  --accent-on:    #ffffff;
+  --accent-surface: #eef2ff;
+  --accent-border:  #c7d2fe;
+
+  /* creature flat palette — JS injects vivid set per hue */
+  --clay-soft: #ededfd; --clay-light: #c5c5f5; --clay-mid: #9191e8;
+  --clay-deep: #6262cc; --clay-ink: #3e3e96; --clay-cheek: #c4a8e6;
 }
 
-/* ── creature / biome / ui keyframes (consolidated from the prototype) ── */
-@keyframes nbFloat { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-9px) } }
-@keyframes nbFloatSoft { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
-@keyframes nbSquish { 0%,100% { transform: scaleY(1) scaleX(1) } 50% { transform: scaleY(.95) scaleX(1.04) } }
-@keyframes nbGasp { 0%,100% { transform: scaleY(1) scaleX(1) } 50% { transform: scaleY(1.06) scaleX(.95) } }
-@keyframes nbTailWag { 0%,100% { transform: rotate(-8deg) } 50% { transform: rotate(8deg) } }
-@keyframes nbCurlSway { 0%,100% { transform: rotate(-5deg) } 50% { transform: rotate(6deg) } }
-@keyframes nbCurlFlop { 0%,100% { transform: rotate(-2deg) } 50% { transform: rotate(3deg) } }
-@keyframes nbBlink { 0%,93%,100% { transform: scaleY(1) } 96% { transform: scaleY(.08) } }
-@keyframes nbTwinkle { 0%,100% { opacity: .2; transform: scale(.6) } 50% { opacity: 1; transform: scale(1) } }
-@keyframes nbTear { 0% { transform: translateY(0); opacity: 0 } 25% { opacity: .95 } 100% { transform: translateY(16px); opacity: 0 } }
-@keyframes nbSweat { 0% { transform: translateY(-2px); opacity: 0 } 25% { opacity: .95 } 100% { transform: translateY(15px); opacity: 0 } }
-@keyframes nbHeart { 0%,100% { transform: scale(1); opacity: .5 } 50% { transform: scale(1.18); opacity: .85 } }
-@keyframes nbDangerGlow { 0%,100% { opacity: .4 } 50% { opacity: .85 } }
+/* ── DARK · the default theme (Helios-flavored, flat) ───────────── */
+[data-theme="dark"] {
+  --canvas: #0c0d10;
+  --page: #16171a;
+  --page-faint: #131418;
 
-@keyframes drift1 { 0% { transform: translateX(-8px) } 50% { transform: translateX(12px) } 100% { transform: translateX(-8px) } }
-@keyframes drift2 { 0% { transform: translateX(8px) } 50% { transform: translateX(-10px) } 100% { transform: translateX(8px) } }
-@keyframes sunPulse { 0%,100% { transform: scale(1); opacity: .92 } 50% { transform: scale(1.05); opacity: 1 } }
-@keyframes sunSpin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
-@keyframes twk { 0%,100% { opacity: .12; transform: scale(.5) } 50% { opacity: 1; transform: scale(1) } }
-@keyframes zzzFloat { 0% { opacity: 0; transform: translateY(0) scale(.6) } 30% { opacity: .9 } 100% { opacity: 0; transform: translateY(-26px) scale(1.1) } }
-@keyframes rainFall { 0% { transform: translateY(-12px); opacity: 0 } 20% { opacity: .7 } 100% { transform: translateY(120px); opacity: 0 } }
+  --surface:        #1c1d22;
+  --surface-faint:  #181a1e;
+  --surface-strong: #252534;
+  --surface-hover:  #23243a;
+  --surface-active: #2c2d48;
 
-@keyframes nnFadeUp { 0% { transform: translateY(10px); opacity: 0 } 100% { transform: translateY(0); opacity: 1 } }
-@keyframes nnPop { 0% { transform: scale(.94) } 60% { transform: scale(1.02) } 100% { transform: scale(1) } }
-@keyframes nnSpin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
-@keyframes nn-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.06); }
+  --ink:   #ffffff;
+  --text:  #d3d6dc;
+  --faint: #9aa0ac;
+  --disabled: #6b7080;
+
+  --line:        rgba(160,166,178,.20);
+  --line-faint:  rgba(160,166,178,.11);
+  --line-strong: rgba(214,218,226,.30);
+  --border: 1px solid var(--line);
+
+  --fill-1: #202227;
+  --fill-2: #26282e;
+
+  --success:        #4ec77a; --success-on: #6fd996; --success-surface: rgba(0,138,34,.15);  --success-border: rgba(78,199,122,.34);
+  --warning:        #e0922e; --warning-on: #eaa54a; --warning-surface: rgba(187,90,0,.18);  --warning-border: rgba(224,146,46,.34);
+  --critical:       #f4716f; --critical-on: #f78b89; --critical-surface: rgba(229,34,40,.16); --critical-border: rgba(244,113,111,.34);
+
+  --mint: var(--success); --mint-soft: var(--success-surface);
+  --amber: var(--warning); --amber-soft: var(--warning-surface);
+  --danger: var(--critical); --danger-soft: var(--critical-surface);
+
+  --teal: #2dd4bf;
+  --calm: #6668a8;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
+  --shadow-md: 0 2px 8px rgba(0,0,0,.4);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,.55);
+
+  --accent:       #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-text:  #a5b4fc;
+  --accent-on:    #0c0d10;
+  --accent-surface: rgba(79,70,229,.16);
+  --accent-border:  rgba(129,140,248,.36);
 }
+
+/* ── type utilities ─────────────────────────────────────────── */
+.nn-disp { font-family: var(--font-disp); font-weight: 600; letter-spacing: -.014em; }
+.nn-num  { font-family: var(--font-mono); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.nn-ui   { font-family: var(--font-ui); }
+.nn-mono { font-family: var(--font-mono); }
+
+/* small uppercase section kicker — used sparingly */
+.nn-eyebrow {
+  font-family: var(--font-ui);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* accent-colored text (was a gradient; now a solid Helios accent) */
+.nn-grad { color: var(--accent-text); }
+
+* { box-sizing: border-box; }
+
+.nn-app {
+  font-family: var(--font-ui);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── motion library (subtle; respects reduced motion) ───────────── */
+@keyframes nn-bob   { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
+@keyframes nn-blink { 0%,93%,100% { transform: scaleY(1) } 96% { transform: scaleY(.1) } }
+@keyframes nn-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+@keyframes nn-rise  { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; }
+  * { animation: none !important; }
 }
+
+/* native range fallback — Helios-flat track + thumb */
+.nn-range { -webkit-appearance: none; appearance: none; height: 22px; background: transparent; cursor: pointer; }
+.nn-range::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: var(--surface-strong); }
+.nn-range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); margin-top: -6px; box-shadow: var(--shadow-sm); transition: transform .12s var(--ease); }
+.nn-range::-webkit-slider-thumb:hover { transform: scale(1.1); }
+
+/* bare range — native track + thumb fully hidden; a custom thumb/track is
+   drawn over it (used by the Settings sliders) */
+.nn-bare-range { -webkit-appearance: none; appearance: none; background: transparent; }
+.nn-bare-range::-webkit-slider-runnable-track { background: transparent; border: none; }
+.nn-bare-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 1px; height: 1px; opacity: 0; }
+.nn-bare-range::-moz-range-track { background: transparent; border: none; }
+.nn-bare-range::-moz-range-thumb { width: 0; height: 0; border: 0; opacity: 0; }
+
+/* scrollbars — neutral, theme-aware */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--line-strong); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }

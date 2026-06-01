@@ -1,189 +1,242 @@
-// ui.tsx — NubeNube design-system primitives, ported from the prototype (ui.jsx).
-// Display/brand: Baloo 2 (nn-disp / nn-num). UI/data: Plus Jakarta Sans.
+// ui.tsx — NubeNube primitives (Helios edition). Flat surfaces, hairline
+// borders, small radii, status colors used with intent. Ported from ui.jsx.
 
-import { useId, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react'
-import { hueClay } from '../lib/clay'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 
-export const UI = 'var(--font-ui)'
-export const DISP = 'var(--font-disp)'
-export const INK = 'var(--ink)'
-export const SUB = 'var(--sub)'
-export const FAINT = 'var(--faint)'
-export const shadow = { sm: 'var(--shadow-sm)', md: 'var(--shadow-md)', lg: 'var(--shadow-lg)' }
-export const elev = { border: 'var(--border)' }
+export function Eyebrow({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+  return <div className="nn-eyebrow" style={style}>{children}</div>
+}
 
-export const fmt = (n: number, d = 1) => Number(n).toFixed(d)
-
-// ── Card ──────────────────────────────────────────────────────
-export function Card({ children, style, pad = 18, ...rest }: { children?: ReactNode; style?: CSSProperties; pad?: number } & React.HTMLAttributes<HTMLDivElement>) {
+export function Card({ children, style, pad = 20, soft, onClick, hoverable }: {
+  children: ReactNode; style?: CSSProperties; pad?: number; soft?: boolean
+  onClick?: () => void; hoverable?: boolean
+}) {
+  const [h, setH] = useState(false)
   return (
-    <div className="nn-ui" {...rest} style={{ background: 'var(--surface)', borderRadius: 18, padding: pad, border: 'var(--border)', boxShadow: shadow.md, ...style }}>
-      {children}
-    </div>
+    <div onClick={onClick}
+      onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
+      style={{
+        background: soft ? 'var(--surface-faint)' : 'var(--surface)',
+        border: '1px solid var(--line)', borderRadius: 'var(--r-lg)', padding: pad,
+        boxShadow: hoverable && h ? 'var(--shadow-md)' : 'none',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'box-shadow .16s var(--ease), border-color .16s',
+        borderColor: hoverable && h ? 'var(--line-strong)' : 'var(--line)',
+        ...style,
+      }}>{children}</div>
   )
 }
 
-// ── Pill ──────────────────────────────────────────────────────
-export function Pill({ children, hue = 268, tone = 'soft', style }: { children?: ReactNode; hue?: number; tone?: 'soft' | 'solid' | 'ghost'; style?: CSSProperties }) {
-  const c = hueClay(hue)
-  const map: Record<string, [string, string]> = { soft: [c.soft, c.ink], solid: [c.deep, '#fff'], ghost: ['rgba(255,255,255,.6)', c.ink] }
-  const [bg, fg] = map[tone] || map.soft
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: bg, color: fg, borderRadius: 99, padding: '5px 11px', fontWeight: 700, fontSize: 11.5, letterSpacing: '.01em', whiteSpace: 'nowrap', fontFamily: UI, ...style }}>
-      {children}
-    </span>
-  )
-}
+type Tone = 'neutral' | 'soft' | 'accent' | 'ghost' | 'mint' | 'amber' | 'danger'
 
-// ── Btn ───────────────────────────────────────────────────────
-type BtnProps = { children?: ReactNode; hue?: number; kind?: 'primary' | 'soft' | 'ghost' | 'line'; size?: 'sm' | 'md' | 'lg'; style?: CSSProperties } & ButtonHTMLAttributes<HTMLButtonElement>
-export function Btn({ children, hue = 268, kind = 'primary', size = 'md', style, ...rest }: BtnProps) {
-  const c = hueClay(hue)
-  const pad = size === 'lg' ? '13px 28px' : size === 'sm' ? '7px 14px' : '10px 20px'
-  const fs = size === 'lg' ? 16 : size === 'sm' ? 13 : 14.5
-  const base: CSSProperties = { border: 'none', cursor: 'pointer', borderRadius: 12, padding: pad, fontFamily: UI, fontWeight: 700, fontSize: fs, letterSpacing: '.01em', whiteSpace: 'nowrap', transition: 'transform .12s ease, box-shadow .2s ease' }
-  const variants: Record<string, CSSProperties> = {
-    primary: { ...base, background: `linear-gradient(165deg, ${c.mid}, ${c.deep})`, color: '#fff', boxShadow: `0 10px 22px -12px ${c.deep}` },
-    soft: { ...base, background: c.soft, color: c.ink },
-    ghost: { ...base, background: 'transparent', color: c.ink },
-    line: { ...base, background: '#fff', color: c.ink, border: `1.5px solid ${c.light}` },
+// Helios-style Badge. tone: neutral | accent | mint | amber | danger
+export function Pill({ children, kind = 'neutral', tone, style }: {
+  children: ReactNode; kind?: Tone; tone?: Tone; style?: CSSProperties
+}) {
+  const tones: Record<Tone, { bg: string; fg: string; bd: string }> = {
+    neutral: { bg: 'var(--surface-strong)', fg: 'var(--text)', bd: 'var(--line)' },
+    soft: { bg: 'var(--accent-surface)', fg: 'var(--accent-text)', bd: 'var(--accent-border)' },
+    accent: { bg: 'var(--accent-surface)', fg: 'var(--accent-text)', bd: 'var(--accent-border)' },
+    ghost: { bg: 'transparent', fg: 'var(--faint)', bd: 'var(--line)' },
+    mint: { bg: 'var(--success-surface)', fg: 'var(--success)', bd: 'var(--success-border)' },
+    amber: { bg: 'var(--warning-surface)', fg: 'var(--warning)', bd: 'var(--warning-border)' },
+    danger: { bg: 'var(--critical-surface)', fg: 'var(--critical)', bd: 'var(--critical-border)' },
   }
+  const t = tones[tone || kind] || tones.neutral
   return (
-    <button {...rest} style={{ ...variants[kind], ...style }} onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1.5px)' }} onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)' }}>
-      {children}
-    </button>
+    <span className="nn-ui" style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '3px 9px', borderRadius: 'var(--r-sm)', fontSize: 12, fontWeight: 600,
+      background: t.bg, color: t.fg, border: `1px solid ${t.bd}`, whiteSpace: 'nowrap',
+      ...style,
+    }}>{children}</span>
   )
 }
 
-// ── Meter ─────────────────────────────────────────────────────
-export function Meter({ value = 1, hue = 268, height = 10, track = 'rgba(80,60,140,.1)', danger = false }: { value?: number; hue?: number; height?: number; track?: string; danger?: boolean }) {
-  const c = hueClay(hue)
-  const pct = Math.max(0, Math.min(100, value * 100))
-  const fill = danger ? 'linear-gradient(90deg,#f3b06a,#ea7458)' : `linear-gradient(90deg, ${c.light}, ${c.deep})`
+type Variant = 'primary' | 'line' | 'soft' | 'ghost' | 'critical'
+
+// Helios Button. variant: primary | line (secondary) | soft | ghost | critical
+export function Btn({ children, variant = 'primary', size = 'md', onClick, style, disabled, full }: {
+  children: ReactNode; variant?: Variant; size?: 'sm' | 'md' | 'lg'
+  onClick?: () => void; style?: CSSProperties; disabled?: boolean; full?: boolean
+}) {
+  const [h, setH] = useState(false)
+  const sizes: Record<string, [number, number, number]> = { sm: [7, 12, 13], md: [9, 15, 14], lg: [12, 20, 15] }
+  const [py, px, fs] = sizes[size] || sizes.md
+  const V: Record<Variant, { bg: string; bgH: string; fg: string; bd: string }> = {
+    primary: { bg: 'var(--accent)', bgH: 'var(--accent-hover)', fg: 'var(--accent-on)', bd: 'transparent' },
+    line: { bg: 'var(--surface)', bgH: 'var(--surface-hover)', fg: 'var(--ink)', bd: 'var(--line-strong)' },
+    soft: { bg: 'var(--accent-surface)', bgH: 'var(--accent-surface)', fg: 'var(--accent-text)', bd: 'var(--accent-border)' },
+    ghost: { bg: 'transparent', bgH: 'var(--surface-hover)', fg: 'var(--text)', bd: 'transparent' },
+    critical: { bg: 'var(--critical)', bgH: 'var(--critical-on)', fg: '#fff', bd: 'transparent' },
+  }
+  const v = V[variant] || V.primary
   return (
-    <div style={{ height, borderRadius: 99, background: track, overflow: 'hidden' }}>
-      <div style={{ width: `${pct}%`, height: '100%', borderRadius: 99, background: fill, transition: 'width .6s cubic-bezier(.4,1.2,.5,1)' }} />
-    </div>
+    <button onClick={onClick} disabled={disabled}
+      onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
+      className="nn-ui" style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+        padding: `${py}px ${px}px`, fontSize: fs, fontWeight: 600, lineHeight: 1,
+        borderRadius: 'var(--r-md)', border: `1px solid ${v.bd}`,
+        background: h && !disabled ? v.bgH : v.bg, color: v.fg, cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.5 : 1, width: full ? '100%' : 'auto',
+        transition: 'background .14s var(--ease), border-color .14s', ...style,
+      }}>{children}</button>
   )
 }
 
-// ── LifeBar — 70% base + up to 30% earned; drains below base when neglected ──
-export function LifeBar({ life = 70, base = 70, hue = 268, height = 16, draining = false }: { life?: number; base?: number; hue?: number; height?: number; draining?: boolean }) {
-  const c = hueClay(hue)
-  const L = Math.max(0, Math.min(100, life))
-  const above = L >= base
+// status dot — flat, optional gentle pulse (no glow)
+export function Dot({ tone = 'var(--success)', size = 8, pulse }: { tone?: string; size?: number; pulse?: boolean }) {
   return (
-    <div style={{ position: 'relative', height, borderRadius: 99, background: 'rgba(80,60,140,.09)', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${base}%`, background: above ? c.soft : 'transparent' }} />
-      {above ? (
-        <>
-          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${base}%`, background: `linear-gradient(90deg, ${c.light}, ${c.mid})` }} />
-          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${L}%`, background: `linear-gradient(90deg, transparent ${(base / L) * 100 - 2}%, ${c.deep} ${(base / L) * 100}%, ${c.deep})`, transition: 'width .6s cubic-bezier(.4,1.2,.5,1)' }} />
-        </>
-      ) : (
-        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${L}%`, background: 'linear-gradient(90deg,#f3b06a,#ea6f52)', transition: 'width .6s cubic-bezier(.4,1.2,.5,1)', animation: draining ? 'nbDangerGlow 1.4s ease-in-out infinite' : undefined }} />
-      )}
-      <div style={{ position: 'absolute', left: `${base}%`, top: -1, bottom: -1, width: 2, background: above ? 'rgba(255,255,255,.85)' : 'rgba(120,90,160,.5)', transform: 'translateX(-1px)' }} />
-    </div>
-  )
-}
-
-// ── Dot ───────────────────────────────────────────────────────
-export function Dot({ color = '#5bc88a', pulse = false, size = 9 }: { color?: string; pulse?: boolean; size?: number }) {
-  return (
-    <span style={{ position: 'relative', display: 'inline-flex' }}>
-      <span style={{ width: size, height: size, borderRadius: 99, background: color, boxShadow: `0 0 0 3px ${color}30` }} />
-      {pulse && <span style={{ position: 'absolute', inset: -3, borderRadius: 99, border: `2px solid ${color}`, animation: 'nbDangerGlow 1.4s ease-in-out infinite' }} />}
+    <span style={{ position: 'relative', display: 'inline-flex', width: size, height: size }}>
+      {pulse && <span style={{ position: 'absolute', inset: -3, borderRadius: '50%', border: `1.5px solid ${tone}`, animation: 'nn-pulse 1.8s var(--ease) infinite' }} />}
+      <span style={{ width: size, height: size, borderRadius: '50%', background: tone }} />
     </span>
   )
 }
 
-// ── Soft (little ground cloud) ────────────────────────────────
-export function Soft({ w = 120, opacity = 0.9 }: { w?: number; opacity?: number }) {
+export function Meter({ value = 0.5, tone = 'var(--accent)', h = 6, track = 'var(--surface-strong)' }: {
+  value?: number; tone?: string; h?: number; track?: string
+}) {
   return (
-    <svg width={w} height={w * 0.3} viewBox="0 0 120 36">
-      <g fill="#fff" opacity={opacity}>
-        <ellipse cx="60" cy="23" rx="54" ry="12" />
-        <ellipse cx="34" cy="19" rx="22" ry="12" />
-        <ellipse cx="82" cy="18" rx="25" ry="13" />
-      </g>
-    </svg>
-  )
-}
-
-// ── Spark (tiny sparkline) ────────────────────────────────────
-export function Spark({ data = [], hue = 268, w = 120, h = 34, fill = true }: { data?: number[]; hue?: number; w?: number; h?: number; fill?: boolean }) {
-  const c = hueClay(hue)
-  const uid = useId().replace(/:/g, '')
-  if (!data.length) return <svg width={w} height={h} />
-  const max = Math.max(...data, 1)
-  const min = Math.min(...data, 0)
-  const pts = data.map((v, i) => [(i / Math.max(1, data.length - 1)) * w, h - ((v - min) / (max - min || 1)) * (h - 4) - 2] as [number, number])
-  const line = pts.map((p) => p.join(',')).join(' ')
-  const last = pts[pts.length - 1]
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', overflow: 'visible' }}>
-      <defs>
-        <linearGradient id={`sp${uid}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={c.mid} stopOpacity=".34" />
-          <stop offset="100%" stopColor={c.mid} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {fill && <polygon points={`0,${h} ${line} ${w},${h}`} fill={`url(#sp${uid})`} />}
-      <polyline points={line} fill="none" stroke={c.deep} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={last[0]} cy={last[1]} r="3" fill={c.deep} />
-    </svg>
-  )
-}
-
-// ── Donut (token composition). segs: [{label, value, color}] ──
-export function Donut({ segs = [], size = 132, thickness = 18, center }: { segs?: { label?: string; value: number; color: string }[]; size?: number; thickness?: number; center?: ReactNode }) {
-  const total = segs.reduce((s, x) => s + x.value, 0) || 1
-  const r = (size - thickness) / 2
-  const C = 2 * Math.PI * r
-  let acc = 0
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(80,60,140,.08)" strokeWidth={thickness} />
-      {segs.map((s, i) => {
-        const frac = s.value / total
-        const dash = frac * C
-        const el = (
-          <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={s.color} strokeWidth={thickness} strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-acc * C} strokeLinecap="butt" transform={`rotate(-90 ${size / 2} ${size / 2})`} />
-        )
-        acc += frac
-        return el
-      })}
-      {center && (
-        <foreignObject x="0" y="0" width={size} height={size}>
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>{center}</div>
-        </foreignObject>
-      )}
-    </svg>
-  )
-}
-
-// ── DragBar (styled range input) ──────────────────────────────
-export function DragBar({ label, value, min, max, step = 1, onChange, format, hue = 268 }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void; format?: (v: number) => string; hue?: number }) {
-  const c = hueClay(hue)
-  const pct = ((value - min) / (max - min)) * 100
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ fontWeight: 700, fontSize: 12.5, color: SUB, fontFamily: UI }}>{label}</span>
-        <span className="nn-num" style={{ fontWeight: 800, fontSize: 13, color: c.ink }}>{format ? format(value) : value}</span>
-      </div>
-      <input className="nn-range" type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ ['--p' as string]: pct + '%', ['--c' as string]: c.deep } as CSSProperties} />
+    <div style={{ height: h, borderRadius: 999, background: track, overflow: 'hidden' }}>
+      <div style={{ width: `${Math.max(0, Math.min(1, value)) * 100}%`, height: '100%', background: tone, borderRadius: 999, transition: 'width .6s var(--ease)' }} />
     </div>
   )
 }
 
-// ── Toggle (switch) ───────────────────────────────────────────
-export function Toggle({ on, onClick, hue = 270 }: { on: boolean; onClick: () => void; hue?: number }) {
-  const c = hueClay(hue)
+// ── LifeBar — the hero meter. 0..cap; baseline ("start · 100") marker.
+export function LifeBar({ life, baseline = 100, cap = 130, height = 10, labels = true }: {
+  life: number; baseline?: number; cap?: number; height?: number; labels?: boolean
+}) {
+  const basePct = (baseline / cap) * 100
+  const fillPct = Math.max(0, Math.min(1, life / cap)) * 100
+  const over = life > baseline
+  const below = life < baseline
+  const tone = over ? 'var(--success)' : below ? (life < 30 ? 'var(--critical)' : 'var(--warning)') : 'var(--success)'
   return (
-    <button onClick={onClick} aria-pressed={on} style={{ width: 46, height: 27, borderRadius: 99, border: 'none', cursor: 'pointer', position: 'relative', background: on ? `linear-gradient(90deg, ${c.light}, ${c.deep})` : 'rgba(120,100,170,.18)', transition: 'background .25s ease', flexShrink: 0 }}>
-      <span style={{ position: 'absolute', top: 3, left: on ? 22 : 3, width: 21, height: 21, borderRadius: 99, background: '#fff', boxShadow: '0 2px 5px rgba(80,60,140,.3)', transition: 'left .2s cubic-bezier(.4,1.4,.5,1)' }} />
+    <div style={{ position: 'relative' }}>
+      <div style={{ position: 'relative', height, borderRadius: 999, overflow: 'hidden', background: 'var(--surface-strong)' }}>
+        {/* over-baseline zone — faint hatch */}
+        <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${basePct}%`, right: 0, background: 'var(--success-surface)' }} />
+        {/* fill */}
+        <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: tone, borderRadius: 999, transition: 'width .6s var(--ease)' }} />
+        {/* baseline marker */}
+        <div style={{ position: 'absolute', top: -2, bottom: -2, left: `${basePct}%`, width: 2, background: 'var(--ink)', opacity: .35 }} />
+      </div>
+      {labels && (
+        <div style={{ position: 'relative', height: 15, marginTop: 6 }}>
+          <span className="nn-mono" style={{ position: 'absolute', left: 0, fontSize: 10, color: 'var(--faint)' }}>0</span>
+          <span className="nn-mono" style={{ position: 'absolute', left: `${basePct}%`, transform: 'translateX(-50%)', fontSize: 10, color: 'var(--faint)' }}>start · 100</span>
+          <span className="nn-mono" style={{ position: 'absolute', right: 0, fontSize: 10, color: 'var(--faint)' }}>max · {cap}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── SplitBar — focused (success) vs distracted (warning) ─────────
+export function SplitBar({ pct, height = 10 }: { pct: number; height?: number }) {
+  return (
+    <div style={{ display: 'flex', height, borderRadius: 999, overflow: 'hidden', background: 'var(--warning-surface)' }}>
+      <div style={{ width: `${pct * 100}%`, background: 'var(--success)', transition: 'width .6s var(--ease)' }} />
+      <div style={{ flex: 1, background: 'var(--warning)' }} />
+    </div>
+  )
+}
+
+export function Spark({ data, tone = 'var(--accent)', w = 120, h = 36, fill = true }: {
+  data: number[]; tone?: string; w?: number; h?: number; fill?: boolean
+}) {
+  const max = Math.max(...data, 1), min = Math.min(...data, 0)
+  const rng = max - min || 1
+  const pts = data.map((d, i) => [(i / (data.length - 1)) * w, h - 4 - ((d - min) / rng) * (h - 8)])
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ')
+  const area = `${line} L${w} ${h} L0 ${h} Z`
+  return (
+    <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
+      {fill && <path d={area} fill={tone} opacity=".1" />}
+      <path d={line} fill="none" stroke={tone} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="2.4" fill={tone} />
+    </svg>
+  )
+}
+
+export function Donut({ segments, size = 120, thickness = 14, label, sub }: {
+  segments: { value: number; color: string }[]; size?: number; thickness?: number; label?: string; sub?: string
+}) {
+  const r = (size - thickness) / 2, c = 2 * Math.PI * r
+  let off = 0
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1
+  return (
+    <div style={{ position: 'relative', width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-strong)" strokeWidth={thickness} />
+        {segments.map((s, i) => {
+          const len = (s.value / total) * c
+          const el = <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={s.color} strokeWidth={thickness} strokeDasharray={`${len} ${c - len}`} strokeDashoffset={-off} />
+          off += len; return el
+        })}
+      </svg>
+      {label && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="nn-num" style={{ fontSize: 20, color: 'var(--ink)' }}>{label}</div>
+          {sub && <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 1 }}>{sub}</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Helios switch — flat
+export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button onClick={() => onChange(!on)} aria-pressed={on} style={{
+      width: 38, height: 22, borderRadius: 999, border: '1px solid', cursor: 'pointer', padding: 2,
+      borderColor: on ? 'transparent' : 'var(--line-strong)',
+      background: on ? 'var(--accent)' : 'var(--surface-strong)', transition: 'background .2s var(--ease), border-color .2s',
+      display: 'flex', justifyContent: on ? 'flex-end' : 'flex-start', alignItems: 'center',
+    }}>
+      <span style={{ width: 16, height: 16, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,.25)', transition: 'all .2s var(--ease)' }} />
     </button>
   )
+}
+
+// Helios segmented control
+export function SegTabs<T extends string>({ tabs, value, onChange, size = 'md' }: {
+  tabs: ({ key: T; label: string } | T)[]; value: T; onChange: (v: T) => void; size?: 'sm' | 'md'
+}) {
+  const py = size === 'sm' ? 5 : 7, fs = size === 'sm' ? 12.5 : 13
+  return (
+    <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--surface-strong)', borderRadius: 'var(--r-md)' }}>
+      {tabs.map((t) => {
+        const k = (typeof t === 'string' ? t : t.key) as T
+        const label = typeof t === 'string' ? t : t.label
+        const act = k === value
+        return (
+          <button key={k} onClick={() => onChange(k)} className="nn-ui" style={{
+            padding: `${py}px 13px`, fontSize: fs, fontWeight: 600, borderRadius: 'var(--r-sm)', border: act ? '1px solid var(--line)' : '1px solid transparent', cursor: 'pointer',
+            background: act ? 'var(--surface)' : 'transparent', color: act ? 'var(--ink)' : 'var(--faint)',
+            boxShadow: act ? 'var(--shadow-sm)' : 'none', transition: 'all .15s var(--ease)', whiteSpace: 'nowrap',
+          }}>{label}</button>
+        )
+      })}
+    </div>
+  )
+}
+
+export function StatTile({ label, value, sub, tone, icon }: {
+  label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: string; icon?: ReactNode
+}) {
+  return (
+    <div style={{ background: 'var(--surface-faint)', border: '1px solid var(--line-faint)', borderRadius: 'var(--r-md)', padding: '13px 15px' }}>
+      <div style={{ marginBottom: 7, display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: 'var(--faint)' }}>{icon}{label}</div>
+      <div className="nn-num" style={{ fontSize: 24, color: tone || 'var(--ink)', lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 5, fontWeight: 500 }}>{sub}</div>}
+    </div>
+  )
+}
+
+export function Divider({ style }: { style?: CSSProperties }) {
+  return <div style={{ height: 1, background: 'var(--line-faint)', ...style }} />
 }

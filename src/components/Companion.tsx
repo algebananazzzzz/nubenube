@@ -1,143 +1,186 @@
 // Companion — the always-on-top desktop indicator (its own transparent window).
-// The card FILLS the window via flexbox (the creature row absorbs slack), so the
-// content can never clip. The whole card is a Tauri drag region: non-interactive
-// content uses pointer-events:none so the press falls through and drags it; the
-// pause button re-enables pointer-events. Open the main window from the tray.
+// Helios card (full) + slim pill (mini). The header is a Tauri drag region; the
+// macOS overlay also makes the whole background draggable.
+//
+// Responsive sizing: the card/pill is sized to its CONTENT (no fixed window
+// height, no flex fillers), and a ResizeObserver reports the measured size to
+// Rust (`nube_resize_companion`) so the OS window tracks the content exactly —
+// it never clips the full card and never leaves dead space or trailing
+// whitespace on the pill.
 
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, type ReactNode, type Ref } from 'react'
 import { useFocus } from '../store/focus'
-import { useUsage } from '../store/usage'
-import { NubeCreature } from './NubeCreature'
-import { Dot, INK, SUB } from './ui'
-import { PHASE_META, phaseFromTick, mmss, type Phase } from '../lib/derive'
+import { usePrefs } from '../store/prefs'
 import { rescue } from '../lib/rescue'
+import { useNube, statusFor, type NubeState } from '../lib/derive'
+import { themeVars } from '../lib/clay'
+import { Sky, Nube } from './NubeCreature'
+import { Dot, Btn, LifeBar } from './ui'
 
-const TEXT: Record<Phase, string> = {
-  working: 'thriving',
-  idle: 'napping',
-  waiting: 'Claude finished — your turn',
-  draining: 'come back to Claude',
-  critical: 'gasping!',
-  fading: 'fading…',
-  faint: 'fainted',
+const CARD_W = 208 // logical px — the card's fixed width; height flows from content
+const PAD = 12 // transparent breathing room around the card for its soft shadow
+
+function Grip() {
+  return (
+    <svg width="16" height="8" viewBox="0 0 16 8" fill="currentColor" style={{ opacity: .4 }}>
+      <circle cx="3" cy="2" r="1" /><circle cx="8" cy="2" r="1" /><circle cx="13" cy="2" r="1" />
+      <circle cx="3" cy="6" r="1" /><circle cx="8" cy="6" r="1" /><circle cx="13" cy="6" r="1" />
+    </svg>
+  )
 }
-const PASS = { pointerEvents: 'none' as const } // fall through to the drag region
-const CLICK = { pointerEvents: 'auto' as const } // re-enable for a control
-const DRAINING: Phase[] = ['draining', 'critical', 'fading']
+
+function MiniStat({ tone, value, label }: { tone: string; value: ReactNode; label: string }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px', borderRadius: 'var(--r-sm)', background: 'var(--surface-faint)', border: '1px solid var(--line-faint)' }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: tone, flexShrink: 0 }} />
+      <span className="nn-num" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{value}</span>
+      <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 500 }}>{label}</span>
+    </div>
+  )
+}
+
+// drifting urgency block — counts down to faint at the honest net rate.
+function CompactCountdown({ s }: { s: NubeState }) {
+  if (s.remaining == null) return null
+  const crit = s.life < 30
+  const tone = crit ? 'var(--critical)' : 'var(--warning)'
+  const surf = crit ? 'var(--critical-surface)' : 'var(--warning-surface)'
+  const bd = crit ? 'var(--critical-border)' : 'var(--warning-border)'
+  return (
+    <div style={{ background: surf, border: `1px solid ${bd}`, borderRadius: 'var(--r-md)', padding: '8px 10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: tone }}>
+          <Dot tone={tone} size={5} pulse /> {s.fainting ? 'fainted' : 'faints in'}
+        </span>
+        <span className="nn-num" style={{ fontSize: 15, fontWeight: 700, color: tone, lineHeight: 1 }}>{s.fmtCountdown(s.remaining)}</span>
+      </div>
+      <div style={{ marginTop: 6, height: 4, borderRadius: 999, background: 'var(--surface-strong)', overflow: 'hidden' }}>
+        <div style={{ width: `${s.countdownPct * 100}%`, height: '100%', background: tone, borderRadius: 999, transition: 'width 1s linear' }} />
+      </div>
+    </div>
+  )
+}
+
+function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: () => void; innerRef: Ref<HTMLDivElement> }) {
+  const st = statusFor(s.effState, s.appName)
+  const lifeTone = s.life >= 100 ? 'var(--success)' : s.life < 30 ? 'var(--critical)' : 'var(--warning)'
+  return (
+    <div ref={innerRef} className="nn-ui" style={{
+      width: CARD_W, borderRadius: 'var(--r-lg)', overflow: 'hidden',
+      background: 'var(--surface)', boxShadow: 'var(--shadow-lg)',
+      border: '1px solid var(--line)', userSelect: 'none',
+    }}>
+      {/* draggable creature header */}
+      <div data-tauri-drag-region style={{ position: 'relative', cursor: 'grab', height: 92, borderBottom: '1px solid var(--line-faint)' }}>
+        <Sky sky={s.sky} style={{ position: 'absolute', inset: 0 }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+            <Nube mood={s.mood} size={74} />
+          </div>
+        </Sky>
+        <div style={{ position: 'absolute', top: 7, left: 0, right: 0, display: 'flex', justifyContent: 'center', color: 'var(--faint)', pointerEvents: 'none' }}><Grip /></div>
+      </div>
+      {/* body — content-sized, no fillers */}
+      <div style={{ padding: '12px 13px 13px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <Dot tone={st.tone} pulse={st.pulse} size={8} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{st.label}</span>
+          <span className="nn-num" style={{ flexShrink: 0, fontSize: 14, fontWeight: 700, color: lifeTone }}>{Math.round(s.life)}%</span>
+        </div>
+
+        {/* urgency when drifting, otherwise the at-a-glance life bar */}
+        <div style={{ marginTop: 11 }}>
+          {s.effState === 'drifting'
+            ? <CompactCountdown s={s} />
+            : <LifeBar life={s.life} baseline={s.baseline} cap={s.cap} height={8} labels={false} />}
+        </div>
+
+        <div style={{ display: 'flex', gap: 7, marginTop: 12 }}>
+          <MiniStat tone="var(--success)" value={s.run} label="running" />
+          <MiniStat tone="var(--warning)" value={s.wait} label="waiting" />
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, marginTop: 9 }}>
+          <Btn variant="soft" size="sm" full onClick={s.togglePause}>{s.paused ? 'Resume' : 'Pause'}</Btn>
+          <button onClick={onMinimize} title="Minimize" style={{ flexShrink: 0, width: 32, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--text)', cursor: 'pointer', fontSize: 15, fontWeight: 700 }}>–</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CompanionMini({ s, onExpand, innerRef }: { s: NubeState; onExpand: () => void; innerRef: Ref<HTMLDivElement> }) {
+  const st = statusFor(s.effState, s.appName)
+  const lifeTone = s.life >= 100 ? 'var(--success)' : s.life < 30 ? 'var(--critical)' : 'var(--warning)'
+  const drift = s.remaining != null
+  const cdTone = s.life < 30 ? 'var(--critical)' : 'var(--warning)'
+  return (
+    // inline-flex → the pill is exactly as wide as its content (no trailing gap)
+    <div ref={innerRef} data-tauri-drag-region title={st.label} style={{
+      display: 'inline-flex', alignItems: 'center', gap: 9, height: 44, padding: '0 14px 0 6px',
+      borderRadius: 'var(--r-pill)', background: 'var(--surface)', boxShadow: 'var(--shadow-lg)',
+      border: '1px solid var(--line)', cursor: 'grab', userSelect: 'none', whiteSpace: 'nowrap',
+    }} className="nn-ui">
+      <button onClick={onExpand} title="expand" style={{ width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', flexShrink: 0, border: '1px solid var(--line-faint)', background: 'var(--surface-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer' }}>
+        <Nube mood={s.mood} size={32} />
+      </button>
+      <span style={{ display: 'inline-flex', flexShrink: 0 }}><Dot tone={st.tone} pulse={st.pulse} size={8} /></span>
+      <span className="nn-num" style={{ fontSize: 14, fontWeight: 700, color: lifeTone, flexShrink: 0 }}>{Math.round(s.life)}%</span>
+      <span style={{ width: 1, height: 16, background: 'var(--line)', flexShrink: 0 }} />
+      {drift && (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: cdTone, flexShrink: 0 }}>
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="7" cy="8" r="5" /><path d="M7 5.5V8l1.6 1" strokeLinecap="round" /><path d="M5.5 1.5h3" strokeLinecap="round" /></svg>
+          <span className="nn-num" style={{ fontSize: 13.5, fontWeight: 700 }}>{s.fmtCountdown(s.remaining ?? 0)}</span>
+        </span>
+      )}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }} title="running"><Dot tone="var(--success)" size={6} /><span className="nn-num" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{s.run}</span></span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }} title="waiting"><Dot tone="var(--warning)" size={6} /><span className="nn-num" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{s.wait}</span></span>
+    </div>
+  )
+}
 
 export function Companion() {
-  const tick = useFocus((s) => s.tick)
-  const subscribe = useFocus((s) => s.subscribe)
-  const projects = useUsage((s) => s.projects)
-  const loadAll = useUsage((s) => s.loadAll)
+  const subscribe = useFocus((st) => st.subscribe)
+  const mini = usePrefs((st) => st.companionMini)
+  const setPref = usePrefs((st) => st.set)
+  const s = useNube()
+  const cardRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     document.documentElement.classList.add('nn-transparent')
     void subscribe()
-    void loadAll()
     return () => document.documentElement.classList.remove('nn-transparent')
-  }, [subscribe, loadAll])
+  }, [subscribe])
 
-  const paused = tick.state === 'paused'
-  const phase = phaseFromTick(tick)
-  const meta = PHASE_META[phase]
-  const project = projects.find((p) => p.id === tick.activeProjectId)
-  const hue = project?.colorHue ?? 268
-  const waiting = tick.waitingSessions ?? 0
-  const running = tick.runningSessions ?? 0
-  const urgent = !paused && (phase === 'waiting' || DRAINING.includes(phase))
-  const backendCountdown = tick.secondsToDeath ?? null
+  useEffect(() => { document.documentElement.setAttribute('data-theme', s.theme) }, [s.theme])
 
-  // Smooth real-time countdown: re-anchor to the backend value on each tick, and
-  // tick down locally every second WHILE actively draining (on a distraction).
-  // When merely waiting (you're not distracted) it holds — the meter is paused,
-  // so the timer is too.
-  const [shown, setShown] = useState<number | null>(backendCountdown)
-  useEffect(() => { setShown(backendCountdown) }, [backendCountdown])
+  // Drive the real OS window size from the measured card/pill (+ shadow padding).
+  // Observing the content element means every layout change — mini⇄full, the
+  // drift countdown appearing, a longer app name — re-fits the window. Re-bound
+  // on `mini` because the observed element itself swaps (card ⇄ pill).
   useEffect(() => {
-    if (!DRAINING.includes(phase)) return
-    const id = setInterval(() => setShown((s) => (s == null ? s : Math.max(0, s - 1))), 1000)
-    return () => clearInterval(id)
-  }, [phase])
-
-  const togglePause = (e: MouseEvent) => { e.stopPropagation(); void rescue.setPaused(!paused) }
-  const showCountdown = waiting > 0 && shown != null
+    const el = cardRef.current
+    if (!el) return
+    let last = ''
+    let raf = 0
+    const measure = () => {
+      const w = Math.ceil(el.offsetWidth) + PAD * 2
+      const h = Math.ceil(el.offsetHeight) + PAD * 2
+      const key = `${w}x${h}`
+      if (w > 1 && h > 1 && key !== last) { last = key; void rescue.resizeCompanion(w, h) }
+    }
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure) })
+    ro.observe(el)
+    measure()
+    return () => { ro.disconnect(); cancelAnimationFrame(raf) }
+  }, [mini])
 
   return (
-    <div className="nn-ui" style={{ position: 'fixed', inset: 0, padding: 8, background: 'transparent' }}>
-      <div
-        data-tauri-drag-region
-        title="drag anywhere to move"
-        style={{
-          width: '100%', height: '100%', boxSizing: 'border-box',
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          borderRadius: 24, padding: '10px 12px 12px', cursor: 'grab', overflow: 'hidden',
-          background: 'rgba(255,255,255,.87)', backdropFilter: 'blur(16px)',
-          boxShadow: urgent
-            ? '0 16px 38px -14px rgba(210,100,60,.55), 0 0 0 2px rgba(236,122,74,.55)'
-            : '0 16px 38px -16px rgba(90,70,150,.5), 0 0 0 1px rgba(255,255,255,.6)',
-          border: '1px solid rgba(255,255,255,.7)',
-          filter: paused ? 'saturate(.7)' : 'none',
-          animation: urgent && phase === 'waiting' ? 'nn-pulse 1.1s ease-in-out 3' : 'none',
-        }}
-      >
-        {/* grab hint */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 3, ...PASS }}>
-          {[0, 1, 2].map((i) => (
-            <span key={i} style={{ width: 5, height: 5, borderRadius: 99, background: 'rgba(120,100,170,.32)' }} />
-          ))}
-        </div>
-
-        {/* creature — flex:1 absorbs slack so the layout never clips */}
-        <div style={{ flex: 1, minHeight: 76, display: 'flex', alignItems: 'center', justifyContent: 'center', ...PASS }}>
-          <NubeCreature mood={paused ? 'content' : meta.mood} hue={hue} size={84} scale={1} />
-        </div>
-
-        {paused ? (
-          <button
-            onClick={togglePause}
-            aria-label="resume drift tracking"
-            style={{ ...CLICK, border: 'none', cursor: 'pointer', borderRadius: 99, padding: '6px 16px', fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 12, background: 'linear-gradient(165deg, hsl(158 50% 60%), hsl(158 55% 50%))', color: '#fff' }}
-          >
-            ▶ resume
-          </button>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, width: '100%' }}>
-            {/* status line */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, ...PASS }}>
-              <Dot color={meta.dot} pulse={urgent} size={7} />
-              <span className="nn-disp" style={{ fontWeight: 800, fontSize: 12.5, color: urgent ? 'var(--danger)' : INK, textAlign: 'center', lineHeight: 1.15 }}>{TEXT[phase]}</span>
-            </div>
-
-            {/* session counts */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, fontWeight: 700, fontSize: 11, ...PASS }}>
-              <span style={{ color: running > 0 ? '#2f8a76' : SUB }}>▶ {running} working</span>
-              <span style={{ width: 3, height: 3, borderRadius: 99, background: 'rgba(120,100,170,.4)' }} />
-              <span style={{ color: waiting > 0 ? 'var(--danger)' : SUB }}>⏸ {waiting} waiting</span>
-            </div>
-
-            {/* countdown — appears the moment a session waits; ticks while drifting */}
-            {showCountdown && (
-              <div
-                style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 1, fontWeight: 800, fontSize: 14, color: 'var(--danger)', fontVariantNumeric: 'tabular-nums', ...PASS }}
-                title="time until Nube dies if you stay on a distraction"
-              >
-                <span style={{ fontSize: 11 }}>⏳</span> {mmss(shown!)}
-              </div>
-            )}
-
-            {/* pause control */}
-            <button
-              onClick={togglePause}
-              aria-label="pause drift tracking"
-              title="pause (lunch / meeting)"
-              style={{ ...CLICK, marginTop: 2, border: 'none', cursor: 'pointer', borderRadius: 99, padding: '3px 12px', fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 10.5, background: 'rgba(120,100,170,.12)', color: SUB }}
-            >
-              ⏸ pause
-            </button>
-          </div>
-        )}
-      </div>
+    // fit-content + padding → the wrapper hugs the card and leaves room for the
+    // soft shadow; the window is then sized to (card + padding) by the effect.
+    <div className="nn-app" data-theme={s.theme} style={{ ...themeVars(s.hue, s.theme, s.clay), width: 'fit-content', padding: PAD, background: 'transparent', filter: s.paused ? 'saturate(.7)' : 'none' }}>
+      {mini
+        ? <CompanionMini s={s} innerRef={cardRef} onExpand={() => setPref('companionMini', false)} />
+        : <CompanionCard s={s} innerRef={cardRef} onMinimize={() => setPref('companionMini', true)} />}
     </div>
   )
 }

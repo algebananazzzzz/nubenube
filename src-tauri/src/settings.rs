@@ -10,11 +10,14 @@ use serde::{Deserialize, Serialize};
 pub struct Sensitivity {
     #[serde(default = "def_grace")]
     pub grace_secs: i64,
-    #[serde(default = "def_decay")]
-    pub decay_per_min: f64,
-    /// Health recovered per token Claude consumes (input+output+cache_create).
-    #[serde(default = "def_recovery_per_token")]
-    pub recovery_per_token: f64,
+    /// Minutes of one-session distraction to drop life baseline→0. Anchors the
+    /// base rate `R = baseline / time_to_death_min` (drift.rs).
+    #[serde(default = "def_time_to_death")]
+    pub time_to_death_min: f64,
+    /// heal-per-running ÷ drain-per-waiting. One running window heals at
+    /// `ratio · R`; default 0.1 → 10 min of work offsets 1 min of distraction.
+    #[serde(default = "def_heal_drain_ratio")]
+    pub heal_drain_ratio: f64,
     #[serde(default = "def_idle")]
     pub idle_threshold_secs: i64,
     #[serde(default = "def_granularity")]
@@ -22,10 +25,22 @@ pub struct Sensitivity {
 }
 
 fn def_grace() -> i64 { 10 }
-fn def_decay() -> f64 { 0.06 }
-fn def_recovery_per_token() -> f64 { 0.000004 }
+fn def_time_to_death() -> f64 { 12.0 }
+fn def_heal_drain_ratio() -> f64 { 0.1 }
 fn def_idle() -> i64 { 120 }
 fn def_granularity() -> String { "app".to_string() }
+
+impl Default for Sensitivity {
+    fn default() -> Self {
+        Sensitivity {
+            grace_secs: def_grace(),
+            time_to_death_min: def_time_to_death(),
+            heal_drain_ratio: def_heal_drain_ratio(),
+            idle_threshold_secs: def_idle(),
+            window_granularity: def_granularity(),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -34,8 +49,17 @@ pub struct WaterRates {
     pub write: f64,
 }
 
+impl Default for WaterRates {
+    fn default() -> Self {
+        WaterRates {
+            read: crate::water::READ_ML_PER_TOKEN,
+            write: crate::water::WRITE_ML_PER_TOKEN,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub distraction_apps: Vec<String>,
     pub sensitivity: Sensitivity,
@@ -46,20 +70,18 @@ pub struct Settings {
     pub log_roots: Vec<String>,
 }
 
-fn s(list: &[&str]) -> Vec<String> {
-    list.iter().map(|x| x.to_string()).collect()
-}
-
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            distraction_apps: s(&[
-                "TikTok", "Netflix", "Steam", "Discord", "Twitch", "Disney+", "Hulu",
-            ]),
+            // No prefilled distractions: nothing is a distraction until the user
+            // tags it in Settings (which scans known + running apps). An empty list
+            // means classify() always returns Neutral, so the meter never falls
+            // for an app the user never chose.
+            distraction_apps: Vec::new(),
             sensitivity: Sensitivity {
                 grace_secs: 10,
-                decay_per_min: 0.06,
-                recovery_per_token: 0.000004,
+                time_to_death_min: 12.0,
+                heal_drain_ratio: 0.1,
                 idle_threshold_secs: 120,
                 window_granularity: "app".to_string(),
             },
@@ -89,10 +111,24 @@ pub fn load(dir: &Path) -> Settings {
         .unwrap_or_default()
 }
 
+/// Last-modified time of the settings file, if it exists. Lets the drift tick
+/// skip the read+parse when nothing has changed (settings are saved atomically,
+/// so a changed mtime always means a fully-written new file).
+pub fn modified(dir: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(file(dir)).and_then(|m| m.modified()).ok()
+}
+
 pub fn save(dir: &Path, settings: &Settings) {
     if let Ok(json) = serde_json::to_string_pretty(settings) {
         let _ = std::fs::create_dir_all(dir);
-        let _ = std::fs::write(file(dir), json);
+        // Write-then-rename: rename is atomic within a dir, so the ~2s drift
+        // tick (which loads this file every tick) can never read a half-written
+        // file and silently fall back to default Settings for that tick.
+        let path = file(dir);
+        let tmp = dir.join("settings.json.tmp");
+        if std::fs::write(&tmp, json).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
     }
 }
 

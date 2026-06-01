@@ -11,6 +11,10 @@
       rel="stylesheet"
     />
     <title>NubeNube</title>
+    <script>
+      try { var r=localStorage.getItem('nn_prefs_v1'); document.documentElement.setAttribute('data-theme', r?(JSON.parse(r).theme||'dark'):'dark') } catch(e) { document.documentElement.setAttribute('data-theme','dark') }
+      if (location.hash==='#/companion') document.documentElement.classList.add('nn-transparent')
+    </script>
   </head>
   <body>
     <div id="root"></div>

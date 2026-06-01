@@ -1,200 +1,195 @@
-// Settings — teach Nube what pulls you away and how hard it fights to bring you
-// back. Real Rust-backed Settings (distraction apps, grace, decay, reset, pause,
-// Claude Code connection) + UI-only prefs (rescue levels, reminder, sound).
+// Settings — teach Nube what pulls you away, and how it should react. Rust-backed
+// Settings (distraction apps, reaction sliders, reset, Claude Code connection) +
+// UI-only prefs (theme, sound, companion, pause). Ported from settings.jsx.
 
-import { useEffect, useState } from 'react'
-import type { KnownApp } from '../types'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useSettings } from '../store/settings'
 import { useUsage } from '../store/usage'
-import { usePrefs } from '../store/prefs'
+import { usePrefs, type Theme } from '../store/prefs'
 import { api } from '../lib/api'
-import { Card, Pill, Btn, Toggle, DragBar, Dot, INK, SUB, FAINT } from '../components/ui'
-import { BASE_LIFE, PAUSE_SENTINEL } from '../lib/derive'
+import { Card, Pill, Btn, Dot, Toggle, SegTabs } from '../components/ui'
 
-const ACCENT = 28 // warm amber for "drains"
-
-function hashHue(s: string): number {
+const BRAND: Record<string, string> = {
+  'chatgpt atlas': '#10a37f', telegram: '#2aabee', claude: '#d97757', electron: '#8a6dff',
+  finder: '#3dc7a0', ghostty: '#e0584f', 'google chrome': '#46a35e', slack: '#7a3b86',
+}
+function colorFor(name: string): string {
+  const k = name.toLowerCase()
+  if (BRAND[k]) return BRAND[k]
   let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
-  return h % 360
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360
+  return `hsl(${h} 55% 52%)`
 }
 
-function AppRow({ name, on, onToggle }: { name: string; on: boolean; onToggle: () => void }) {
-  const hue = hashHue(name)
+function AppAvatar({ name, color }: { name: string; color: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 4px' }}>
-      <div className="nn-disp" style={{ width: 38, height: 38, borderRadius: 11, background: `hsl(${hue} 64% 62%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: `0 6px 14px -6px hsl(${hue} 64% 62%)`, color: '#fff', fontWeight: 800, fontSize: 18 }}>{name[0]?.toUpperCase()}</div>
+    <div style={{ width: 34, height: 34, borderRadius: 'var(--r-sm)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: color, color: '#fff', fontWeight: 700, fontSize: 15 }}>
+      {name[0]?.toUpperCase() ?? '?'}
+    </div>
+  )
+}
+
+function AppRow({ name, on, onToggle, last }: { name: string; on: boolean; onToggle: () => void; last?: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 2px', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
+      <AppAvatar name={name} color={colorFor(name)} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="nn-disp" style={{ fontWeight: 700, fontSize: 14.5, color: INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
-        <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT }}>{on ? 'drains Nube when Claude waits' : 'ignored'}</div>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{name}</div>
+        <div style={{ fontSize: 12, color: on ? 'var(--critical)' : 'var(--faint)', fontWeight: 500, marginTop: 1 }}>
+          {on ? 'Drains Nube while Claude is idle' : 'Ignored'}
+        </div>
       </div>
-      <span style={{ fontWeight: 700, fontSize: 11.5, color: on ? 'var(--danger)' : FAINT, marginRight: 2 }}>{on ? 'drains' : 'ignored'}</span>
-      <Toggle on={on} hue={on ? ACCENT : 270} onClick={onToggle} />
+      <Toggle on={on} onChange={onToggle} />
+    </div>
+  )
+}
+
+function SliderRow({ title, value, fmt, min, max, step, onChange, accent, last }: {
+  title: string; value: number; fmt: (v: number) => string; min: number; max: number; step: number
+  onChange: (v: number) => void; accent: string; last?: boolean
+}) {
+  const pct = ((value - min) / (max - min)) * 100
+  return (
+    <div style={{ padding: '14px 0', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', flexShrink: 0 }}>{title}</div>
+        <div className="nn-num" style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--faint)', textAlign: 'right' }}>{fmt(value)}</div>
+      </div>
+      <div style={{ position: 'relative', height: 16 }}>
+        <div style={{ position: 'absolute', top: 6, left: 0, right: 0, height: 4, borderRadius: 999, background: 'var(--surface-strong)' }} />
+        <div style={{ position: 'absolute', top: 6, left: 0, width: `${pct}%`, height: 4, borderRadius: 999, background: accent }} />
+        <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(+e.target.value)}
+          className="nn-bare-range"
+          style={{ position: 'absolute', inset: '-3px 0', width: '100%', height: 22, margin: 0, cursor: 'pointer' }} />
+        <div style={{ position: 'absolute', top: '50%', left: `${pct}%`, width: 16, height: 16, marginLeft: -8, transform: 'translateY(-50%)', borderRadius: '50%', background: '#fff', border: `2px solid ${accent}`, boxShadow: 'var(--shadow-sm)', pointerEvents: 'none' }} />
+      </div>
+    </div>
+  )
+}
+
+function PrefRow({ title, desc, children, last }: { title: string; desc?: ReactNode; children: ReactNode; last?: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '13px 0', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
+        {desc && <div style={{ fontSize: 12.5, color: 'var(--faint)', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>}
+      </div>
+      <div style={{ flexShrink: 0 }}>{children}</div>
+    </div>
+  )
+}
+
+function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+      <div className="nn-disp" style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', flex: 1 }}>{children}</div>
+      {right}
     </div>
   )
 }
 
 export function Settings() {
   const settings = useSettings((s) => s.settings)
-  const load = useSettings((s) => s.load)
   const save = useSettings((s) => s.save)
+  const loadSettings = useSettings((s) => s.load)
+  const settingsLoaded = useSettings((s) => s.loaded)
   const connection = useUsage((s) => s.connection)
-  const loadAll = useUsage((s) => s.loadAll)
   const rescan = useUsage((s) => s.rescan)
-  const prefs = usePrefs()
-  const [adding, setAdding] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [known, setKnown] = useState<KnownApp[]>([])
-  const [running, setRunning] = useState<string[]>([])
-  const refreshApps = async () => {
-    const [k, r] = await Promise.all([api.getKnownApps(), api.listRunningApps()])
-    setKnown(k.data)
-    setRunning(r.data)
+  const theme = usePrefs((s) => s.theme)
+  const sound = usePrefs((s) => s.sound)
+  const companion = usePrefs((s) => s.companion)
+  const setPref = usePrefs((s) => s.set)
+
+  const [discovered, setDiscovered] = useState<string[]>([])
+  const [scanning, setScanning] = useState(false)
+
+  useEffect(() => { if (!settingsLoaded) void loadSettings() }, [settingsLoaded, loadSettings])
+  useEffect(() => { void api.getKnownApps().then((r) => setDiscovered(r.data.map((a) => a.name))) }, [])
+
+  if (!settings) return <div style={{ color: 'var(--faint)', fontSize: 13 }}>Loading…</div>
+
+  const tagged = settings.distractionApps
+  const isOn = (name: string) => tagged.some((d) => d.toLowerCase() === name.toLowerCase())
+
+  // union of discovered + tagged apps (tagged always show), draining ones first
+  const seen = new Map<string, string>()
+  for (const n of [...discovered, ...tagged]) {
+    if (!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n)
   }
-  useEffect(() => { void refreshApps() }, [])
+  const apps = [...seen.values()].sort((a, b) => {
+    const oa = isOn(a) ? 0 : 1, ob = isOn(b) ? 0 : 1
+    return oa - ob || a.localeCompare(b)
+  })
 
-  useEffect(() => { void load() }, [load])
-
-  if (!settings) {
-    return <div className="nn-ui" style={{ height: '100%', display: 'grid', placeItems: 'center', color: FAINT, fontWeight: 600 }}>loading settings…</div>
-  }
-
-  const distraction = settings.distractionApps
-  const distractSet = new Set(distraction.map((d) => d.toLowerCase()))
-  const nameMap = new Map<string, string>() // lowercase key → display name
-  for (const d of distraction) nameMap.set(d.toLowerCase(), d)
-  for (const k of known) nameMap.set(k.name.toLowerCase(), k.name) // known wins for display
-  for (const r of running) if (!nameMap.has(r.toLowerCase())) nameMap.set(r.toLowerCase(), r)
-  const names = [...nameMap.values()].sort((a, b) => a.localeCompare(b))
-  const apps = names.map((name) => ({ name, on: distractSet.has(name.toLowerCase()) }))
-
-  const toggleApp = (name: string, on: boolean) => {
-    if (on) {
-      save({ distractionApps: distraction.filter((n) => n.toLowerCase() !== name.toLowerCase()) })
-    } else {
-      save({ distractionApps: [...distraction, name] })
-    }
-  }
-  const addApp = () => {
-    const n = adding.trim()
-    if (!n || distractSet.has(n.toLowerCase())) return setAdding('')
-    save({ distractionApps: [...distraction, n] })
-    setAdding('')
+  const toggleApp = (name: string) => {
+    const next = isOn(name) ? tagged.filter((d) => d.toLowerCase() !== name.toLowerCase()) : [...tagged, name]
+    void save({ distractionApps: next })
   }
 
-  // numeric tuning ↔ real sensitivity. Death = draining the full base life to 0,
-  // so "minutes to die" = baseFrac / decayPerMin.
-  const baseFrac = BASE_LIFE / 100
-  const dieMin = Math.max(1, Math.min(15, Math.round(baseFrac / Math.max(0.001, settings.sensitivity.decayPerMin))))
-  const setDieMin = (m: number) => save({ sensitivity: { ...settings.sensitivity, decayPerMin: baseFrac / m } })
-  const setGrace = (s: number) => save({ sensitivity: { ...settings.sensitivity, graceSecs: s } })
-
-  const connect = async (install: boolean) => {
-    setBusy(true)
-    await (install ? api.installHooks() : api.uninstallHooks())
-    await loadAll()
-    setBusy(false)
+  const scan = async () => {
+    setScanning(true)
+    const [known, running] = await Promise.all([api.getKnownApps(), api.listRunningApps()])
+    const names = new Set([...known.data.map((a) => a.name), ...running.data])
+    setDiscovered((prev) => [...new Set([...prev, ...names])])
+    setTimeout(() => setScanning(false), 600)
   }
 
-  const hooked = connection?.hooksInstalled
-  const paused = !!settings.pauseUntil && new Date(settings.pauseUntil).getTime() > Date.now()
-  const togglePause = () => save({ pauseUntil: paused ? null : PAUSE_SENTINEL })
-
-  const sectionTitle = (t: string) => <div className="nn-disp" style={{ fontWeight: 800, fontSize: 16, color: INK }}>{t}</div>
+  const sens = settings.sensitivity
+  const setSens = (patch: Partial<typeof sens>) => void save({ sensitivity: { ...sens, ...patch } })
 
   return (
-    <div className="nn-ui" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: 22, overflow: 'hidden' }}>
-      <div className="nn-disp" style={{ fontWeight: 800, fontSize: 22, color: INK, lineHeight: 1, marginBottom: 4 }}>settings</div>
-      <div style={{ fontWeight: 600, fontSize: 13, color: SUB, marginBottom: 14 }}>teach Nube what pulls you away — and how hard it should fight to bring you back</div>
-
-      <div style={{ flex: 1, overflowY: 'auto', paddingRight: 6, display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 14, alignItems: 'start' }}>
-        {/* left column */}
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, alignItems: 'start' }}>
+        {/* LEFT */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* distraction apps */}
-          <Card pad={18}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              {sectionTitle('what counts as distraction')}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Pill hue={ACCENT} tone="soft" style={{ fontSize: 11 }}>{distraction.length} drain</Pill>
-                <Btn hue={268} kind="soft" size="sm" onClick={() => void refreshApps()}>↻ scan apps</Btn>
-              </div>
-            </div>
-            <div style={{ fontWeight: 600, fontSize: 12, color: SUB, marginBottom: 4 }}>tag the apps that pull you away. while Claude waits, only these drain Nube — research &amp; editors never do.</div>
-            <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 320, overflowY: 'auto' }}>
-              {apps.map((a, i) => (
-                <div key={a.name} style={{ borderTop: i === 0 ? 'none' : '1px solid rgba(120,100,170,.1)' }}>
-                  <AppRow name={a.name} on={a.on} onToggle={() => toggleApp(a.name, a.on)} />
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <input value={adding} onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addApp()} placeholder="add an app or website…" style={{ flex: 1, border: '2px dashed rgba(150,120,200,.35)', background: 'transparent', borderRadius: 12, padding: '10px 12px', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: INK, outline: 'none' }} />
-              <Btn hue={ACCENT} kind="soft" size="sm" onClick={addApp}>add</Btn>
+          <Card pad={20}>
+            <SectionTitle right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Pill tone="amber" style={{ fontSize: 11.5 }}>{tagged.length} draining</Pill><Btn variant="line" size="sm" onClick={scan}>{scanning ? 'Scanning…' : 'Scan apps'}</Btn></div>}>
+              Distractions
+            </SectionTitle>
+            {apps.length === 0 && !scanning && (
+              <div style={{ textAlign: 'center', padding: '20px 0 6px', color: 'var(--faint)', fontSize: 13 }}>No apps detected yet — run a scan.</div>
+            )}
+            <div style={{ maxHeight: 248, overflow: 'auto', margin: '0 -2px', paddingRight: 2 }}>
+              {apps.map((name, i) => <AppRow key={name} name={name} on={isOn(name)} onToggle={() => toggleApp(name)} last={i === apps.length - 1} />)}
             </div>
           </Card>
 
-          {/* connect Claude Code */}
-          <Card pad={18}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              {sectionTitle('Claude Code connection')}
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 11.5, color: connection?.connected ? '#2f8a76' : FAINT }}>
-                <Dot color={connection?.connected ? '#54c489' : '#bbb'} size={7} /> {connection?.connected ? 'reading your logs' : 'not connected'}
-              </span>
-            </div>
-            <div style={{ fontWeight: 600, fontSize: 12, color: SUB, marginBottom: 10 }}>
-              {connection?.projectsDetected ?? 0} projects · {(connection?.sessionsScanned ?? 0).toLocaleString()} sessions scanned
-            </div>
+          <Card pad={20}>
+            <SectionTitle right={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600, color: connection?.connected ? 'var(--success)' : 'var(--faint)' }}><Dot tone={connection?.connected ? 'var(--success)' : 'var(--faint)'} size={7} pulse={connection?.connected} /> {connection?.connected ? 'Connected' : 'Not connected'}</span>}>
+              Claude Code
+            </SectionTitle>
+            <div className="nn-mono" style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 14 }}>{connection?.projectsDetected ?? 0} projects · {(connection?.sessionsScanned ?? 0).toLocaleString()} sessions scanned</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Btn hue={268} kind={hooked ? 'line' : 'primary'} size="sm" onClick={() => connect(!hooked)} disabled={busy}>
-                {hooked ? 'remove drift hook' : 'install drift hook'}
-              </Btn>
-              <Btn hue={268} kind="soft" size="sm" onClick={() => void rescan()} disabled={busy}>rescan logs</Btn>
+              <Btn variant="line" size="sm" onClick={() => void api.uninstallHooks()}>Remove hook</Btn>
+              <Btn variant="soft" size="sm" onClick={() => void rescan()}>Rescan logs</Btn>
             </div>
-            <div style={{ fontWeight: 600, fontSize: 11, color: FAINT, marginTop: 9 }}>
-              the hook lets Nube know the moment Claude finishes a turn — so it only counts drift while Claude is actually waiting for you.
+            <div style={{ fontSize: 12, color: 'var(--faint)', lineHeight: 1.5, marginTop: 14 }}>
+              The hook tells Nube the moment Claude finishes a turn, so drift only counts while Claude is actually idle.
             </div>
           </Card>
         </div>
 
-        {/* right column */}
+        {/* RIGHT */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Card pad={18}>
-            {sectionTitle('how Nube reacts')}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 17, margin: '14px 0 18px' }}>
-              <DragBar label="Nube dies after" value={dieMin} min={1} max={15} step={1} hue={ACCENT} format={(v) => `${v} min · per waiting session`} onChange={setDieMin} />
-              <DragBar label="grace before draining" value={settings.sensitivity.graceSecs} min={0} max={120} step={5} hue={ACCENT} format={(v) => `${v}s`} onChange={setGrace} />
-            </div>
+          <Card pad={20}>
+            <SectionTitle>How Nube reacts</SectionTitle>
+            <SliderRow title="Nube dies after" value={Math.round(sens.timeToDeathMin)} min={5} max={60} step={1} onChange={(v) => setSens({ timeToDeathMin: v })} accent="var(--warning)" fmt={(v) => `${v} mins of drift`} />
+            <SliderRow title="Health restoration" value={Math.round(sens.healDrainRatio * 100)} min={5} max={50} step={1} onChange={(v) => setSens({ healDrainRatio: v / 100 })} accent="var(--success)" fmt={(v) => `factor of ${v}%`} />
+            <SliderRow title="Grace period before draining" value={sens.graceSecs} min={0} max={180} step={5} onChange={(v) => setSens({ graceSecs: v })} accent="var(--warning)" fmt={(v) => `${v}s`} last />
           </Card>
 
-          <Card pad={18}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0' }}>
-              <div>
-                <div className="nn-disp" style={{ fontWeight: 800, fontSize: 15, color: INK }}>sound</div>
-                <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT }}>chimes for danger &amp; relief</div>
-              </div>
-              <Toggle on={prefs.sound} onClick={() => prefs.set('sound', !prefs.sound)} hue={270} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderTop: '1px solid rgba(120,100,170,.1)' }}>
-              <div>
-                <div className="nn-disp" style={{ fontWeight: 800, fontSize: 15, color: INK }}>desktop companion</div>
-                <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT }}>a floating Nube that watches over you on the desktop</div>
-              </div>
-              <Toggle on={prefs.companion} onClick={() => prefs.set('companion', !prefs.companion)} hue={270} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderTop: '1px solid rgba(120,100,170,.1)' }}>
-              <div>
-                <div className="nn-disp" style={{ fontWeight: 800, fontSize: 15, color: INK }}>daily reset</div>
-                <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT }}>life refreshes to {BASE_LIFE}% each morning</div>
-              </div>
-              <input type="time" value={settings.resetTimeLocal} onChange={(e) => save({ resetTimeLocal: e.target.value })} style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 13, color: INK, border: '1px solid rgba(120,100,170,.2)', borderRadius: 10, padding: '6px 10px', background: '#fff' }} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderTop: '1px solid rgba(120,100,170,.1)' }}>
-              <div>
-                <div className="nn-disp" style={{ fontWeight: 800, fontSize: 15, color: INK }}>break / pause</div>
-                <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT }}>{paused ? 'paused — Nube is resting' : 'lunch & meetings won’t drain Nube'}</div>
-              </div>
-              <Btn hue={paused ? 158 : 268} kind={paused ? 'primary' : 'soft'} size="sm" onClick={togglePause}>{paused ? 'resume' : 'pause'}</Btn>
-            </div>
+          <Card pad={20}>
+            <SectionTitle>Preferences</SectionTitle>
+            <PrefRow title="Theme" desc="Configure your preferred theme.">
+              <SegTabs<Theme> tabs={[{ key: 'dark', label: 'Dark' }, { key: 'light', label: 'Light' }]} value={theme} onChange={(v) => setPref('theme', v)} size="sm" />
+            </PrefRow>
+            <PrefRow title="Sound" desc="Chimes for danger and relief."><Toggle on={sound} onChange={(v) => setPref('sound', v)} /></PrefRow>
+            <PrefRow title="Desktop companion" desc="A floating widget that watches over you.">
+              <Toggle on={companion} onChange={(v) => setPref('companion', v)} />
+            </PrefRow>
+            <PrefRow title="Daily reset" desc="Life resets to 100% at this time." last>
+              <input type="time" value={settings.resetTimeLocal} onChange={(e) => void save({ resetTimeLocal: e.target.value })} className="nn-num" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '7px 11px', colorScheme: theme }} />
+            </PrefRow>
           </Card>
         </div>
       </div>

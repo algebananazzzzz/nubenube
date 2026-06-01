@@ -1,3 +1,6 @@
+// objc 0.2's sel_impl macro uses #[cfg(cargo-clippy)] which newer rustc flags
+// as unexpected; suppress until a newer objc release fixes the macro.
+#![allow(unexpected_cfgs)]
 // Nube Nube — native (Rust) entry point.
 //
 //   M0: plugins + single-instance.
@@ -54,6 +57,16 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // macOS: run as an Accessory (agent) app — NO Dock icon. This is the
+            // ONLY way a window can float over OTHER apps' native-fullscreen Spaces.
+            // A Regular-policy app's windows are blocked from another app's
+            // full-screen Space regardless of NSWindow level / collectionBehavior,
+            // so the native tweaks in apply_macos_overlay are necessary but not
+            // sufficient without this. The main window stays reachable via the
+            // tray ("Open Nube Nube"), which activates + fronts it.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -111,7 +124,7 @@ pub fn run() {
             // Spaces and window switches).
             if let Ok(w) = WebviewWindowBuilder::new(app.handle(), "companion", WebviewUrl::App("index.html#/companion".into()))
                 .title("Nube")
-                .inner_size(196.0, 214.0)
+                .inner_size(commands::COMPANION_FULL.0, commands::COMPANION_FULL.1)
                 .resizable(false)
                 .decorations(false)
                 .transparent(true)
@@ -134,15 +147,13 @@ pub fn run() {
             commands::get_connection_status,
             commands::get_project_detail,
             commands::rescan_logs,
-            commands::export_data,
             commands::get_settings,
             commands::save_settings,
             commands::install_hooks,
             commands::uninstall_hooks,
-            commands::request_permission,
-            commands::reset_today,
             commands::nube_open_main,
             commands::nube_set_companion,
+            commands::nube_resize_companion,
             commands::nube_set_paused,
             commands::get_known_apps,
             commands::list_running_apps,
