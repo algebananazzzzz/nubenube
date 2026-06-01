@@ -252,5 +252,4 @@ export const mockFocusTick: FocusTick = {
   secondsSinceClaudeFinished: 42,
   waitingSessions: 0,
   runningSessions: 1,
-  secondsToDeath: undefined,
 }

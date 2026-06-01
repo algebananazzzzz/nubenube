@@ -95,7 +95,7 @@ export function phaseFromTick(t: FocusTick): Phase {
     case 'growing':
       return 'working'
     default:
-      return 'idle'
+      return 'idle' // 'unknown' / any future state → safe resting default
   }
 }
 

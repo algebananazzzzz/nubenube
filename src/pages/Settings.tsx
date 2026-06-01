@@ -61,9 +61,11 @@ export function Settings() {
 
   const distraction = settings.distractionApps
   const distractSet = new Set(distraction.map((d) => d.toLowerCase()))
-  const names = Array.from(
-    new Set<string>([...distraction, ...known.map((k) => k.name), ...running])
-  ).sort((a, b) => a.localeCompare(b))
+  const nameMap = new Map<string, string>() // lowercase key → display name
+  for (const d of distraction) nameMap.set(d.toLowerCase(), d)
+  for (const k of known) nameMap.set(k.name.toLowerCase(), k.name) // known wins for display
+  for (const r of running) if (!nameMap.has(r.toLowerCase())) nameMap.set(r.toLowerCase(), r)
+  const names = [...nameMap.values()].sort((a, b) => a.localeCompare(b))
   const apps = names.map((name) => ({ name, on: distractSet.has(name.toLowerCase()) }))
 
   const toggleApp = (name: string, on: boolean) => {
