@@ -46,8 +46,8 @@ export function Insights() {
   const aggTok = insights ? sumTokenM(insights.tokens) : 0
 
   const focusSecs = insights?.claudeActiveSecs ?? 0
-  const driftSecs = insights?.driftSecs ?? 0
   const breakdown = insights?.distractionBreakdown ?? []
+  const breakdownTotal = breakdown.reduce((s, b) => s + b.secs, 0)
   const streak = insights?.longestFocusStreakSecs ?? 0
   const msgs = projects.reduce((s, p) => s + p.msgCount, 0)
 
@@ -89,7 +89,7 @@ export function Insights() {
         {/* honest stat cards (range-scoped) */}
         <div style={{ display: 'flex', gap: 12, flexShrink: 0 }}>
           <StatCard label="time Claude worked" value={formatDuration(focusSecs)} sub={`tokens flowing · this ${range}`} color="#2f8a76" />
-          <StatCard label="time drifted" value={formatDuration(driftSecs)} sub="distraction while Claude waited" color="var(--danger)" />
+          <StatCard label="time drifted" value={formatDuration(breakdownTotal)} sub="distraction while Claude waited" color="var(--danger)" />
           <StatCard label="longest focus" value={formatDuration(streak)} sub="best unbroken stretch" color="#6a4aa8" />
         </div>
 
@@ -97,7 +97,7 @@ export function Insights() {
         <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 18, border: elev.border, boxShadow: shadow.md, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
             <div style={{ fontWeight: 700, fontSize: 12.5, color: SUB, letterSpacing: '.02em' }}>TIME LOST TO DISTRACTIONS · this {range}</div>
-            <span className="nn-num" style={{ fontWeight: 800, fontSize: 14, color: 'var(--danger)' }}>{formatDuration(driftSecs)}</span>
+            <span className="nn-num" style={{ fontWeight: 800, fontSize: 14, color: 'var(--danger)' }}>{formatDuration(breakdownTotal)}</span>
           </div>
           <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT, marginBottom: 10 }}>only counts time on apps you tagged as distractions while Claude was waiting</div>
           {breakdown.length === 0 ? (
@@ -156,7 +156,7 @@ export function Insights() {
           <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 18, border: elev.border, boxShadow: shadow.md, display: 'flex', flexDirection: 'column' }}>
             <div style={{ fontWeight: 700, fontSize: 12.5, color: SUB, letterSpacing: '.02em', marginBottom: 13 }}>FOCUS · this {range}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-              {([['time focused', formatDuration(focusSecs), ic.deep], ['Claude waited', formatDuration(driftSecs), 'var(--danger)'], ['water this range', formatWater(insights?.waterMl ?? 0), INK], ['messages all-time', msgs.toLocaleString(), INK]] as [string, string, string][]).map(([l, v, col]) => (
+              {([['time focused', formatDuration(focusSecs), ic.deep], ['Claude waited', formatDuration(breakdownTotal), 'var(--danger)'], ['water this range', formatWater(insights?.waterMl ?? 0), INK], ['messages all-time', msgs.toLocaleString(), INK]] as [string, string, string][]).map(([l, v, col]) => (
                 <div key={l} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                   <span style={{ fontWeight: 600, fontSize: 12.5, color: SUB, whiteSpace: 'nowrap' }}>{l}</span>
                   <span className="nn-num" style={{ fontWeight: 800, fontSize: 14, color: col, whiteSpace: 'nowrap', flexShrink: 0 }}>{v}</span>
