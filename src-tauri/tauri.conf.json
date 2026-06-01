@@ -43,5 +43,13 @@
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/OWNER/nubenube/releases/latest/download/latest.json"
+      ],
+      "pubkey": "PASTE_YOUR_PUBLIC_KEY_HERE"
+    }
   }
 }
