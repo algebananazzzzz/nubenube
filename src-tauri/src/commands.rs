@@ -152,6 +152,31 @@ pub fn nube_open_main(app: AppHandle) {
     }
 }
 
+/// macOS: make the companion float over EVERYTHING — full-screen apps and all
+/// Spaces — and be draggable by its whole background. Tauri's always_on_top /
+/// visible_on_all_workspaces don't cover full-screen; this sets the native
+/// NSWindow level + collection behavior directly. No-op on other platforms.
+#[cfg(target_os = "macos")]
+pub fn apply_macos_overlay(w: &WebviewWindow) {
+    use objc::runtime::{Object, YES};
+    use objc::{msg_send, sel, sel_impl};
+    if let Ok(ptr) = w.ns_window() {
+        let ns = ptr as *mut Object;
+        unsafe {
+            // NSStatusWindowLevel (25): above normal + floating app windows.
+            let _: () = msg_send![ns, setLevel: 25_isize];
+            // canJoinAllSpaces(1<<0) | stationary(1<<4) | fullScreenAuxiliary(1<<8) = 273
+            // fullScreenAuxiliary is the bit that lets it show over full-screen apps.
+            let _: () = msg_send![ns, setCollectionBehavior: 273_usize];
+            // drag the window by clicking anywhere on its background.
+            let _: () = msg_send![ns, setMovableByWindowBackground: YES];
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn apply_macos_overlay(_w: &WebviewWindow) {}
+
 #[tauri::command]
 pub fn nube_set_companion(app: AppHandle, visible: bool) {
     if let Some(w) = app.get_webview_window("companion") {
@@ -159,6 +184,7 @@ pub fn nube_set_companion(app: AppHandle, visible: bool) {
             let _ = w.set_always_on_top(true);
             let _ = w.set_visible_on_all_workspaces(true);
             let _ = w.show();
+            apply_macos_overlay(&w); // macOS: over-fullscreen + all-Spaces + bg-drag
         } else {
             let _ = w.hide();
         }

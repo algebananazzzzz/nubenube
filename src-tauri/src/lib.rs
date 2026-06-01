@@ -122,6 +122,7 @@ pub fn run() {
                 .build()
             {
                 commands::position_companion(&w);
+                commands::apply_macos_overlay(&w);
             }
 
             Ok(())

@@ -44,3 +44,8 @@ anyhow = "1"
 # internally (macOS = no permission for app name + idle; Linux X11 full, Wayland fallback).
 active-win-pos-rs = "0.11"
 user-idle = "0.6"
+
+# macOS: native NSWindow tweaks for the companion overlay — float over full-screen
+# apps + all Spaces (fullScreenAuxiliary) and drag by the window background.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
