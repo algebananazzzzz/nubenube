@@ -28,20 +28,21 @@ are you there to continue, or did you drift to a distraction?
 ## 2. Core concept
 
 One value per project, `life`, on a bar from `0` to `cap`, where
-`cap = baseline + bonus`.
+`baseline = 100` (full / "par") and the **bonus is hardcoded at 30% of baseline**,
+so `cap = baseline · 1.3 = 130`.
 
 ```
- cap  ┌─────┐ 100  ← fully banked → "thriving"
-      │▓▓▓▓▓│      ↑ BONUS (default 30): focus credit, earned by
- base ├─────┤  70  │   working, spent on distraction
-      │░░░░░│      ↓ BELOW BASELINE = deficit → escalating distress
+ cap  ┌─────┐ 130  ← over-charged (banked burst) → "thriving"
+      │▒▒▒▒▒│      ↑ BONUS = 30% of baseline (HARDCODED): focus
+ base ├─────┤ 100  │   credit earned by working, spent on distraction
+      │█████│      ↓ BELOW 100% = deficit → escalating distress
    0  └─────┘   0  ← "faint"
 ```
 
-- **baseline** (default 70) — the daily reset level ("par").
-- **bonus** (default 30) — headroom above baseline you can bank by working; the
-  top of the bar.
-- Above baseline = spending earned credit (Nube is fine). Below baseline = real
+- **baseline = 100** — full/normal life; the daily reset level. Not a slider.
+- **bonus = 0.3 · baseline = 30** (hardcoded) — over-charge headroom above 100%
+  you bank by working; `cap = 130`.
+- At/above 100% = healthy, optionally spending banked burst. Below 100% = real
   deficit (Nube suffers, escalating as it falls).
 
 The token→water→**size** meter is **removed**. The creature's size becomes fixed
@@ -81,10 +82,10 @@ life += ( HEAL·running − DRAIN·waiting ) · (dt / 60)      // then clamp to 
 R = baseline / T          // %-points per minute, per waiting session
 ```
 
-Default `T = 12 min`, `baseline = 70` → `R ≈ 5.83 %/min`. At `ratio = 0.1`, one
-running window heals `≈ 0.58 %/min`, so **10 min of one running window = 1 min of
-one ignored waiting session** — the user's intended rule. Banked bonus buys extra
-survival time on top of `T`.
+Default `T = 12 min`, `baseline = 100` → `R ≈ 8.33 %/min`. At `ratio = 0.1`, one
+running window heals `≈ 0.83 %/min`, so **10 min of one running window = 1 min of
+one ignored waiting session** — the user's intended rule. The banked bonus (up to
++30) buys extra survival time on top of `T`.
 
 ## 4. Severity tracks `life` (not the clock)
 
@@ -142,23 +143,23 @@ All live, replacing today's two sliders:
 
 | setting | default | meaning |
 |---|---|---|
-| `baseline` | 70 | daily reset level; bottom-of-bonus line |
-| `bonus` | 30 | headroom above baseline; `cap = baseline + bonus` |
 | `timeToDeathMin` (`T`) | 12 | minutes of one-session distraction, baseline → 0 |
 | `healDrainRatio` | 0.1 | heal-per-running ÷ drain-per-waiting |
 | `graceSecs` | 10 | delay after Claude finishes before drift can start |
 | `idleThresholdSecs` | 120 | away-time that freezes the meter |
 | `resetTimeLocal` | 05:00 | daily reset time |
 
-The life bar visually rescales to `baseline + bonus`, with a baseline marker.
+**Hardcoded (not sliders):** `baseline = 100`, `bonus = 0.3 · baseline = 30`
+(→ `cap = 130`). The life bar is fixed 0–130 with the 100% baseline marker; the
+banked-burst region (100–130) renders as an over-charge above the line.
 
 ## 8. Data flow & components (what changes)
 
 - **`settings.rs`** — replace `Sensitivity` fields: drop `decay_per_min` and
-  `recovery_per_token`; add `baseline`, `bonus`, `time_to_death_min`,
-  `heal_drain_ratio`. Keep `grace_secs`, `idle_threshold_secs`. Distraction list
-  default stays empty (prior fix). Add a settings version/migration so old files
-  upgrade cleanly.
+  `recovery_per_token`; add `time_to_death_min` and `heal_drain_ratio`. Keep
+  `grace_secs`, `idle_threshold_secs`. `baseline` (100) and the bonus ratio (0.3)
+  are module constants, not settings. Distraction list default stays empty (prior
+  fix). Add a settings version/migration so old files upgrade cleanly.
 - **`drift.rs`** —
   - Replace `apply_focus` with the net-rate formula (§3). Keep it a pure,
     unit-tested function: `apply_life(life, dt, cap, R, ratio, running, waiting, on_distraction) -> f64`.
