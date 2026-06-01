@@ -2,12 +2,6 @@
 // as unexpected; suppress until a newer objc release fixes the macro.
 #![allow(unexpected_cfgs)]
 // Nube Nube — native (Rust) entry point.
-//
-//   M0: plugins + single-instance.
-//   M1: usage connector (SQLite + incremental log tailing) + commands.
-//   M2: active-window + idle watcher + drift state machine.
-//   M3: Claude Code hook installer + events.jsonl tail + drift notifications.
-//   M5: system tray.
 
 mod commands;
 mod connector;
@@ -45,9 +39,10 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
-        // Closing the main window hides it (the app keeps living in the tray, so
-        // the rescue supervisor + companion stay alive). Quit from the tray.
+        // Close hides the main window; the app lives on in the tray.
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
@@ -57,13 +52,10 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // macOS: run as an Accessory (agent) app — NO Dock icon. This is the
-            // ONLY way a window can float over OTHER apps' native-fullscreen Spaces.
-            // A Regular-policy app's windows are blocked from another app's
-            // full-screen Space regardless of NSWindow level / collectionBehavior,
-            // so the native tweaks in apply_macos_overlay are necessary but not
-            // sufficient without this. The main window stays reachable via the
-            // tray ("Open Nube Nube"), which activates + fronts it.
+            // macOS: Accessory policy (no Dock icon) is the ONLY way a window can
+            // float over another app's native-fullscreen Space; the NSWindow
+            // tweaks in apply_macos_overlay are necessary but not sufficient alone.
+            // Main window stays reachable via the tray.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -88,8 +80,7 @@ pub fn run() {
             // Connector: initial scan + fs watcher.
             connector::start(app.handle().clone(), db_path.clone());
 
-            // Self-heal Claude Code hooks if the user previously installed them
-            // (fixes the empty-array regression that silenced events).
+            // Self-heal previously-installed hooks (empty-array regression).
             let _ = hooks_installer::ensure_installed();
 
             // Drift: watcher loop + Claude-Code event tail.
@@ -120,8 +111,7 @@ pub fn run() {
             }
             let _tray = builder.build(app)?;
 
-            // Always-on-top desktop companion = the live indicator (floats across
-            // Spaces and window switches).
+            // Always-on-top companion — the live indicator (floats across Spaces).
             if let Ok(w) = WebviewWindowBuilder::new(app.handle(), "companion", WebviewUrl::App("index.html#/companion".into()))
                 .title("Nube")
                 .inner_size(commands::COMPANION_FULL.0, commands::COMPANION_FULL.1)

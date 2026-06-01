@@ -31,6 +31,8 @@ tauri-plugin-store = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 # Usage connector + storage
 rusqlite = { version = "0.32", features = ["bundled"] }
