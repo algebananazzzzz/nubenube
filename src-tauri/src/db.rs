@@ -168,6 +168,33 @@ pub fn add_drift_by_app(conn: &Connection, day: &str, app_name: &str, secs: i64)
     );
 }
 
+/// First local_day to include for an insights range ("" = no lower bound).
+fn range_start_day(range: &str) -> String {
+    match range {
+        "today" => today_str(),
+        "week" => (Local::now() - Duration::days(6)).format("%Y-%m-%d").to_string(),
+        "month" => Local::now().format("%Y-%m-01").to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Per-app distracted seconds within a range, biggest first.
+pub fn drift_app_breakdown(conn: &Connection, range: &str) -> Vec<(String, i64)> {
+    let start = range_start_day(range);
+    let mut out = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT app_name, SUM(secs) FROM drift_by_app WHERE local_day >= ?1 GROUP BY app_name ORDER BY 2 DESC",
+    ) {
+        let rows = stmt
+            .query_map([&start], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .into_iter()
+            .flatten()
+            .flatten();
+        out.extend(rows);
+    }
+    out
+}
+
 // ----------------------------------------------------------------------------
 //  Ingest (incremental tail)
 // ----------------------------------------------------------------------------
@@ -646,6 +673,22 @@ pub fn get_insights(conn: &Connection, range: &str) -> Insights {
         cache_read: a.cache_read + d.tokens.cache_read,
     });
 
+    let distraction_breakdown = drift_app_breakdown(conn, range)
+        .into_iter()
+        .map(|(name, secs)| DistractionSlice { name, secs })
+        .collect();
+
+    // honest range-scoped focus/drift from drift_daily (range_start_day added in 5.1)
+    let start = range_start_day(range);
+    let (active_total, drift_total) = conn
+        .query_row(
+            "SELECT COALESCE(SUM(claude_active_secs),0), COALESCE(SUM(drift_secs),0)
+             FROM drift_daily WHERE local_day >= ?1",
+            [&start],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .unwrap_or((0, 0));
+
     Insights {
         range: range.to_string(),
         water_ml: total_water,
@@ -653,9 +696,10 @@ pub fn get_insights(conn: &Connection, range: &str) -> Insights {
         by_day,
         by_hour,
         top_projects: tops,
-        claude_active_secs: 0,
-        drift_secs: 0,
+        claude_active_secs: active_total,
+        drift_secs: drift_total,
         longest_focus_streak_secs: 0,
+        distraction_breakdown,
     }
 }
 

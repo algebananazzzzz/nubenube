@@ -72,6 +72,13 @@ pub struct TopProject {
     pub color_hue: i64,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DistractionSlice {
+    pub name: String,
+    pub secs: i64,
+}
+
 #[derive(Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Insights {
@@ -84,6 +91,7 @@ pub struct Insights {
     pub claude_active_secs: i64,
     pub drift_secs: i64,
     pub longest_focus_streak_secs: i64,
+    pub distraction_breakdown: Vec<DistractionSlice>,
 }
 
 #[derive(Serialize, Clone)]
