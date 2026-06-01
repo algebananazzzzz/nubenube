@@ -1,0 +1,43 @@
+name: 2 - PR CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+
+  test-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+      # Add integration test commands here when ready
