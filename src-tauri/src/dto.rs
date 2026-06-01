@@ -1,6 +1,5 @@
 //! Output structs returned to the frontend. `rename_all = "camelCase"` makes
-//! them match src/types.ts exactly (cacheCreate, waterMl, projectCount, ...).
-//! Trimmed to only what the Helios redesign renders.
+//! them match src/types.ts (cacheCreate, waterMl, projectCount, ...).
 
 use serde::Serialize;
 
@@ -93,16 +92,13 @@ pub struct FocusTickDto {
     pub waiting_sessions: i64,
     pub running_sessions: i64,
     pub seconds_to_death: Option<i64>,
-    /// Today's (reset-day) activity totals, in seconds. `active` = states 1+2+3+4;
-    /// `distract` = states 3+4 (`active - distract` = focused, states 1+2);
-    /// `work` = session-weighted Claude-working time (Σ running·dt, ticks faster
-    /// with more windows); `monitored` = present-&-tracking wall-clock.
+    /// Today's (reset-day) activity secs: active = states 1-4; distract = 3-4
+    /// (active − distract = focused); work = Σ running·dt; monitored = tracked time.
     pub active_secs_today: i64,
     pub distract_secs_today: i64,
     pub work_secs_today: i64,
     pub monitored_secs_today: i64,
-    /// True while the meter is frozen (paused or away/idle) — lets the UI know
-    /// when NOT to tick its live timers locally.
+    /// Meter frozen (paused or away/idle) — UI stops its local live timers.
     pub frozen: bool,
     /// Active project's hue (drives the accent + creature tint), 0..360.
     pub color_hue: i64,

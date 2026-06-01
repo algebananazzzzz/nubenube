@@ -1,13 +1,8 @@
-//! SQLite storage + the usage connector's parse/dedup/aggregate logic.
-//!
-//! Design notes (verified empirically against the real ~/.claude data):
-//!   * Only type=="assistant" records carry usage.
-//!   * Dedup key = (message.id, requestId); one message spans many lines, so
-//!     naive sums overcount 1.7–3.9x. We INSERT OR IGNORE on that key.
-//!   * Sum all four token fields; cache_read dominates (~97%).
-//!   * Attribute by the project dir segment (stable); show the modal cwd.
-//!   * Local-day / local-month / local-hour are precomputed at insert time so
-//!     aggregation queries are trivial and timezone-correct.
+//! SQLite storage + the connector's parse/dedup/aggregate logic. Notes (verified
+//! against real ~/.claude data): only type=="assistant" lines carry usage; dedup
+//! on (message.id, requestId) since one message spans many lines (naive sums
+//! overcount 1.7–3.9×); cache_read dominates the mass; local_day/month/hour are
+//! precomputed at insert so aggregation stays trivial and timezone-correct.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -29,20 +24,17 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
     let _ = conn.pragma_update(None, "journal_mode", "WAL");
     let _ = conn.pragma_update(None, "synchronous", "NORMAL");
-    // Four threads (connector, drift tick, events tail, commands) write to this
-    // DB. WAL serializes writers; the default 0ms busy timeout would make a
-    // colliding write fail with SQLITE_BUSY and get silently dropped (every
-    // write site discards its Result). Wait instead so writes aren't lost. Kept
-    // modest because the drift tick holds the runtime mutex while it writes.
+    // WAL serializes the 4 writer threads; the default 0ms busy timeout would
+    // drop a colliding write (SQLITE_BUSY, and every write site ignores its
+    // Result). Wait instead. Modest: the drift tick holds the runtime mutex.
     let _ = conn.busy_timeout(std::time::Duration::from_millis(1000));
     migrate(&conn)?;
     Ok(conn)
 }
 
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
-    // `open` is called on a hot path (every drift tick, every command, every
-    // ingest), so gate the whole CREATE/ALTER/UPDATE batch on user_version —
-    // run it once per DB instead of re-parsing/re-attempting it on every open.
+    // `open` is hot (every tick/command/ingest); gate the batch on user_version
+    // so it runs once per DB, not on every open.
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap_or(0);
@@ -70,9 +62,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_msg_project ON messages_seen(project_id);
         CREATE INDEX IF NOT EXISTS idx_msg_day ON messages_seen(local_day);
-        -- resolve_project_by_cwd (per hook event) does WHERE cwd=? ORDER BY
-        -- ts_utc DESC; the composite seeks the cwd then reads the newest row
-        -- directly. Also accelerates the cwd GROUP BYs in the modal-cwd queries.
+        -- for resolve_project_by_cwd (WHERE cwd=? ORDER BY ts_utc DESC) and the
+        -- cwd GROUP BYs.
         CREATE INDEX IF NOT EXISTS idx_msg_cwd ON messages_seen(cwd, ts_utc);
 
         CREATE TABLE IF NOT EXISTS file_cursors (
@@ -87,10 +78,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             value TEXT NOT NULL
         );
 
-        -- driven by the watcher / drift state machine (M2).
-        -- `claude_active_secs` = Claude working; `waiting_secs` = Claude idle,
-        -- waiting on you (attending, not distracted); `drift_secs` = on a
-        -- distraction while Claude waits; `idle_secs` = away.
+        -- per project-day focus secs: claude_active (working), waiting (idle on
+        -- you), drift (distraction while waiting), idle (away).
         CREATE TABLE IF NOT EXISTS drift_daily (
             project_id          TEXT NOT NULL,
             local_day           TEXT NOT NULL,
@@ -117,11 +106,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             secs      INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (local_day, app_name)
         );
-        -- per-(reset)day activity totals, keyed by reset-day:
-        --   active_secs    = states 1+2+3+4 (engaged or on a distraction)
-        --   distract_secs  = states 3+4 (on a distraction)
-        --   work_secs      = session-weighted Claude-working seconds (Σ running·dt)
-        --   monitored_secs = present-&-tracking wall-clock (everything but paused/away)
+        -- per reset-day totals: active (states 1-4), distract (3-4), work
+        -- (Σ running·dt), monitored (tracked wall-clock).
         CREATE TABLE IF NOT EXISTS day_stats (
             local_day      TEXT PRIMARY KEY,
             active_secs    INTEGER NOT NULL DEFAULT 0,
@@ -131,8 +117,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         );
         "#,
     )?;
-    // best-effort column adds for DBs created before a column existed
-    // (no-ops that error harmlessly if the column is already present).
+    // best-effort column adds for pre-existing DBs (harmless if already present).
     let _ = conn.execute(
         "ALTER TABLE drift_daily ADD COLUMN waiting_secs INTEGER NOT NULL DEFAULT 0",
         [],
@@ -145,8 +130,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         "ALTER TABLE day_stats ADD COLUMN monitored_secs INTEGER NOT NULL DEFAULT 0",
         [],
     );
-    // backfill rows that pre-date the monitored_secs column (they got DEFAULT 0
-    // but already had real distract_secs / active_secs, making distracted > monitored)
+    // backfill pre-monitored_secs rows (DEFAULT 0 but with real active_secs).
     let _ = conn.execute(
         "UPDATE day_stats SET monitored_secs = active_secs WHERE monitored_secs = 0 AND active_secs > 0",
         [],
@@ -443,9 +427,8 @@ fn process_line(conn: &Connection, line: &str, project_id: &str, naive: &mut u64
     let cwd = parsed.cwd.unwrap_or_default();
     let is_side = if parsed.is_sidechain.unwrap_or(false) { 1 } else { 0 };
 
-    // prepare_cached: this runs once per assistant line (thousands on an initial
-    // scan), so reuse one compiled statement across the whole ingest instead of
-    // re-parsing the SQL on every insert.
+    // prepare_cached: reuse one compiled statement across the ingest (this runs
+    // once per assistant line — thousands on an initial scan).
     let changed = conn
         .prepare_cached(
             "INSERT OR IGNORE INTO messages_seen
@@ -488,10 +471,8 @@ fn modal_cwds(conn: &Connection) -> HashMap<String, String> {
     best.into_iter().map(|(k, v)| (k, v.0)).collect()
 }
 
-/// The single most common (modal) cwd for ONE project. Uses the project_id
-/// index instead of scanning every project's rows like `modal_cwds`, so callers
-/// that only need one project (project_name, project detail) don't pay for the
-/// whole table.
+/// Modal cwd for ONE project — uses the project_id index instead of scanning
+/// every project like `modal_cwds`, for callers that need just one.
 fn modal_cwd_for(conn: &Connection, pid: &str) -> String {
     conn.query_row(
         "SELECT cwd FROM messages_seen WHERE project_id=?1 AND cwd<>''
@@ -693,10 +674,9 @@ pub fn project_name(conn: &Connection, pid: &str) -> String {
     name_from(&modal_cwd_for(conn, pid), pid)
 }
 
-/// (life, last_reset_day) on the new 0..130 scale — defaults to (BASELINE, "")
-/// if unseen. MIGRATION: pre-redesign rows stored `cloud_health` on the old
-/// 0..1 scale; any stored value `<= CAP/100` (1.3) is treated as old-scale and
-/// reset once to BASELINE so the meter starts fresh on the new scale.
+/// (life, last_reset_day) on the 0..130 scale; (BASELINE, "") if unseen.
+/// MIGRATION: a stored cloud_health <= CAP/100 (1.3) is an old 0..1-scale value
+/// → reset once to BASELINE.
 pub fn load_health(conn: &Connection, pid: &str) -> (f64, String) {
     let baseline = crate::drift::BASELINE;
     let old_scale_max = crate::drift::CAP / 100.0; // 1.3

@@ -1,7 +1,5 @@
-//! Water model — MUST mirror src/theme/units.ts.
-//! Reading (input + cached context) is ~10x cheaper than writing (output).
-//! Rates are mL per token. v1 uses these defaults; a later milestone can read
-//! overrides from the settings store.
+//! Water model: reading (input + cached) is ~10× cheaper than writing (output).
+//! Rates are mL/token; settings can override the defaults.
 
 pub const READ_ML_PER_TOKEN: f64 = 0.0002; // input, cache_read, cache_creation
 pub const WRITE_ML_PER_TOKEN: f64 = 0.0015; // output

@@ -96,10 +96,8 @@ pub fn uninstall_hooks(state: State<AppState>) -> ConnectionStatus {
 
 // ── desktop companion window ──────────────────────────────────────────────
 
-/// Initial companion window size (logical px) — just a first guess for the very
-/// first paint. The webview measures its real content and calls
-/// `nube_resize_companion` to fit exactly, so this never clips: the window
-/// always tracks the card/pill's intrinsic size.
+/// Initial companion size (logical px) — a first-paint guess; the webview then
+/// calls `nube_resize_companion` to fit its measured content exactly.
 pub const COMPANION_FULL: (f64, f64) = (232.0, 300.0);
 
 /// Nestle the always-on-top companion into the bottom-right of its monitor.
@@ -136,20 +134,15 @@ pub fn nube_open_main(app: AppHandle) {
     }
 }
 
-/// macOS: make the companion float over EVERYTHING — other apps' full-screen
-/// Spaces and all regular Spaces — and be draggable by its whole background.
-///
-/// IMPORTANT: the level + collectionBehavior set here are necessary but NOT
-/// sufficient on their own. macOS blocks a Regular-activation-policy app from
-/// another app's native-full-screen Space no matter how high the window level
-/// is — so this only actually covers full-screen apps because the app runs as
-/// ActivationPolicy::Accessory (set in lib.rs setup). Don't "fix" a
-/// not-over-fullscreen regression by bumping the level; check the policy first.
-/// No-op on other platforms.
+/// macOS: float the companion over everything (incl. other apps' full-screen
+/// Spaces) and let it drag by its background. The level + collectionBehavior here
+/// are necessary but NOT sufficient — over-fullscreen only works because the app
+/// runs as ActivationPolicy::Accessory (lib.rs). Don't "fix" a not-over-fullscreen
+/// regression by bumping the level; check the policy first. No-op elsewhere.
 #[cfg(target_os = "macos")]
 pub fn apply_macos_overlay(w: &WebviewWindow) {
-    use objc::runtime::{Object, YES, NO};
-    use objc::{class, msg_send, sel, sel_impl};
+    use objc::runtime::{Object, YES};
+    use objc::{msg_send, sel, sel_impl};
     if let Ok(ptr) = w.ns_window() {
         let ns = ptr as *mut Object;
         unsafe {
@@ -160,14 +153,6 @@ pub fn apply_macos_overlay(w: &WebviewWindow) {
             let _: () = msg_send![ns, setCollectionBehavior: 273_usize];
             // drag the window by clicking anywhere on its background.
             let _: () = msg_send![ns, setMovableByWindowBackground: YES];
-            // Tauri's transparent(true) clears the NSWindow background but the
-            // WKWebView (contentView) still draws its own gray fill. Clear that too.
-            let content_view: *mut Object = msg_send![ns, contentView];
-            if !content_view.is_null() {
-                let _: () = msg_send![content_view, setOpaque: NO];
-                let clear: *mut Object = msg_send![class!(NSColor), clearColor];
-                let _: () = msg_send![content_view, setBackgroundColor: clear];
-            }
         }
     }
 }
@@ -189,13 +174,9 @@ pub fn nube_set_companion(app: AppHandle, visible: bool) {
     }
 }
 
-/// Size the companion window to the exact size the webview measured for its
-/// content (logical px), so the card/pill is never clipped and never padded
-/// with dead space. We pin the window's BOTTOM-RIGHT corner across the resize
-/// so it grows up/left from wherever it currently sits — it never slides under
-/// the Dock and a user-dragged position is preserved.
-/// Sync command → runs on the main thread, so the pre-resize rect we read is
-/// the real one. Re-assert the macOS overlay after resizing.
+/// Resize the companion to the webview's measured content size, pinning the
+/// bottom-right corner so it grows up/left (never slides under the Dock, keeps a
+/// user-dragged position). Sync → main thread, so the pre-resize rect is real.
 #[tauri::command]
 pub fn nube_resize_companion(app: AppHandle, width: f64, height: f64) {
     if let Some(w) = app.get_webview_window("companion") {
@@ -221,9 +202,8 @@ pub fn nube_resize_companion(app: AppHandle, width: f64, height: f64) {
     }
 }
 
-/// Toggle indefinite drift-tracking pause. true -> far-future pauseUntil
-/// (matches the frontend PAUSE_SENTINEL); false -> clear it. The drift loop
-/// reads pauseUntil each tick, so this takes effect within ~2s for every window.
+/// Toggle indefinite pause via a far-future pauseUntil (matches the frontend
+/// PAUSE_SENTINEL); the drift loop picks it up within ~2s.
 #[tauri::command]
 pub fn nube_set_paused(state: State<AppState>, paused: bool) {
     let mut s = crate::settings::load(&state.config_dir);

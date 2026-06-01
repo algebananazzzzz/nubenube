@@ -1,12 +1,9 @@
-//! Non-destructive Claude Code hook installer.
-//!
-//! Appends SessionStart/UserPromptSubmit/Stop/SessionEnd hooks plus the
-//! mid-turn block hooks (PreToolUse[AskUserQuestion] + Notification → `wait`,
-//! PostToolUse → `reengage`) to ~/.claude/settings.json (user scope = all
-//! projects) that write a small event line to ~/.claude/hooks/nube/events.jsonl.
-//! We deep-merge into the existing JSON, preserving the user's other hooks (a
-//! pre-existing Notification entry is kept alongside ours) and statusLine, and
-//! back the file up once before the first edit.
+//! Non-destructive Claude Code hook installer. Deep-merges nube hooks into
+//! ~/.claude/settings.json (user scope), preserving the user's other hooks and
+//! statusLine and backing the file up once before the first edit. Each hook
+//! writes one event line to ~/.claude/hooks/nube/events.jsonl. Events:
+//! SessionStart, UserPromptSubmit, Stop, SessionEnd, plus mid-turn block
+//! (PreToolUse[AskUserQuestion] + Notification → wait, PostToolUse → reengage).
 
 use std::path::{Path, PathBuf};
 
@@ -126,10 +123,8 @@ pub fn install_at(dir: &Path) -> Result<()> {
     add_hook_entry(&mut root, "UserPromptSubmit", &format!("{base} reengage"), None);
     add_hook_entry(&mut root, "Stop", &format!("{base} stop"), None);
     add_hook_entry(&mut root, "SessionEnd", &format!("{base} end"), None);
-    // Mid-turn: Claude blocked on you → Waiting. A "userchoose" prompt is the
-    // AskUserQuestion tool (caught at PreToolUse); permission/idle prompts arrive
-    // via Notification. Resume to Running the instant ANY tool completes — that's
-    // you having answered/granted — so PostToolUse matches all tools.
+    // Mid-turn block: AskUserQuestion (PreToolUse) + permission/idle Notification
+    // → wait; resume to Running when any tool completes (PostToolUse → reengage).
     add_hook_entry(&mut root, "PreToolUse", &format!("{base} wait"), Some("AskUserQuestion"));
     add_hook_entry(&mut root, "Notification", &format!("{base} wait"), None);
     add_hook_entry(&mut root, "PostToolUse", &format!("{base} reengage"), Some("*"));

@@ -73,10 +73,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            // No prefilled distractions: nothing is a distraction until the user
-            // tags it in Settings (which scans known + running apps). An empty list
-            // means classify() always returns Neutral, so the meter never falls
-            // for an app the user never chose.
+            // No prefilled distractions — empty list means classify() is always
+            // Neutral until the user tags an app.
             distraction_apps: Vec::new(),
             sensitivity: Sensitivity {
                 grace_secs: 10,
@@ -111,9 +109,8 @@ pub fn load(dir: &Path) -> Settings {
         .unwrap_or_default()
 }
 
-/// Last-modified time of the settings file, if it exists. Lets the drift tick
-/// skip the read+parse when nothing has changed (settings are saved atomically,
-/// so a changed mtime always means a fully-written new file).
+/// Settings-file mtime, if it exists; lets the drift tick skip a re-read when
+/// unchanged (saves are atomic, so a new mtime = a fully-written file).
 pub fn modified(dir: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(file(dir)).and_then(|m| m.modified()).ok()
 }
@@ -121,9 +118,8 @@ pub fn modified(dir: &Path) -> Option<std::time::SystemTime> {
 pub fn save(dir: &Path, settings: &Settings) {
     if let Ok(json) = serde_json::to_string_pretty(settings) {
         let _ = std::fs::create_dir_all(dir);
-        // Write-then-rename: rename is atomic within a dir, so the ~2s drift
-        // tick (which loads this file every tick) can never read a half-written
-        // file and silently fall back to default Settings for that tick.
+        // Write-then-rename (atomic within a dir) so the drift tick never reads a
+        // half-written file and falls back to defaults.
         let path = file(dir);
         let tmp = dir.join("settings.json.tmp");
         if std::fs::write(&tmp, json).is_ok() {

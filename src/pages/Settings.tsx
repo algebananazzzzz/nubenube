@@ -36,7 +36,7 @@ function AppRow({ name, on, onToggle, last }: { name: string; on: boolean; onTog
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{name}</div>
         <div style={{ fontSize: 12, color: on ? 'var(--critical)' : 'var(--faint)', fontWeight: 500, marginTop: 1 }}>
-          {on ? 'Drains Nube while Claude is idle' : 'Ignored'}
+          {on ? 'Drains health while Claude is waiting' : 'Ignored'}
         </div>
       </div>
       <Toggle on={on} onChange={onToggle} />
@@ -173,9 +173,9 @@ export function Settings() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card pad={20}>
             <SectionTitle>How Nube reacts</SectionTitle>
-            <SliderRow title="Nube dies after" value={Math.round(sens.timeToDeathMin)} min={5} max={60} step={1} onChange={(v) => setSens({ timeToDeathMin: v })} accent="var(--warning)" fmt={(v) => `${v} mins of drift`} />
-            <SliderRow title="Health restoration" value={Math.round(sens.healDrainRatio * 100)} min={5} max={50} step={1} onChange={(v) => setSens({ healDrainRatio: v / 100 })} accent="var(--success)" fmt={(v) => `factor of ${v}%`} />
-            <SliderRow title="Grace period before draining" value={sens.graceSecs} min={0} max={180} step={5} onChange={(v) => setSens({ graceSecs: v })} accent="var(--warning)" fmt={(v) => `${v}s`} last />
+            <SliderRow title="Nube dies after" value={Math.round(sens.timeToDeathMin)} min={1} max={60} step={1} onChange={(v) => setSens({ timeToDeathMin: v })} accent="var(--warning)" fmt={(v) => `${v} mins of drift`} />
+            <SliderRow title="Health restoration" value={Math.round(sens.healDrainRatio * 100)} min={1} max={50} step={1} onChange={(v) => setSens({ healDrainRatio: v / 100 })} accent="var(--success)" fmt={(v) => `factor of ${v}%`} />
+            <SliderRow title="Grace period before draining" value={sens.graceSecs} min={1} max={60} step={1} onChange={(v) => setSens({ graceSecs: v })} accent="var(--warning)" fmt={(v) => `${v}s`} last />
           </Card>
 
           <Card pad={20}>

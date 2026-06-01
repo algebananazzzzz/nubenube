@@ -13,12 +13,6 @@ try {
   document.documentElement.setAttribute('data-theme', 'dark')
 }
 
-// Companion window: make body/root transparent before first paint so the
-// canvas background never shows in the shadow-padding area around the card.
-if (window.location.hash === '#/companion') {
-  document.documentElement.classList.add('nn-transparent')
-}
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

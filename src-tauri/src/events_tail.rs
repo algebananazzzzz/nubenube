@@ -1,10 +1,9 @@
-//! Tails ~/.claude/hooks/nube/events.jsonl and feeds the hook events
-//! (start / reengage / stop / end, plus the mid-turn `wait` from
-//! PreToolUse[AskUserQuestion] + Notification) into the drift state machine.
-//! Decoupled from Claude Code (events queue on disk even while the app is
-//! closed); we start reading at EOF so only NEW events fire.
+//! Tails ~/.claude/hooks/nube/events.jsonl and feeds the hook events (start /
+//! reengage / stop / end / wait) into the drift state machine. Events queue on
+//! disk while the app is closed; we start at EOF so only new ones fire. Once
+//! drained past a size cap the log self-resets to empty (state lives in memory).
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -23,6 +22,10 @@ struct Ev {
     session_id: Option<String>,
 }
 
+/// Reset the drained event log once it grows past this. The tail only ever
+/// reads forward, so anything already consumed is dead weight safe to drop.
+const MAX_LOG_BYTES: u64 = 1024 * 1024; // 1 MB
+
 pub fn start(_app: AppHandle, runtime: Arc<Mutex<DriftRuntime>>) {
     std::thread::spawn(move || {
         let path = hooks_installer::events_file();
@@ -40,47 +43,63 @@ pub fn start(_app: AppHandle, runtime: Arc<Mutex<DriftRuntime>>) {
             if size < offset {
                 offset = 0; // rotated/truncated
             }
-            if size == offset {
-                continue;
-            }
-            let mut f = match File::open(&path) {
-                Ok(f) => f,
-                Err(_) => continue,
-            };
-            if f.seek(SeekFrom::Start(offset)).is_err() {
-                continue;
-            }
-            let mut reader = BufReader::new(f);
-            let mut consumed = offset;
-            loop {
-                let mut line = String::new();
-                let n = match reader.read_line(&mut line) {
-                    Ok(n) => n,
-                    Err(_) => break,
+            if size > offset {
+                let mut f = match File::open(&path) {
+                    Ok(f) => f,
+                    Err(_) => continue,
                 };
-                if n == 0 {
-                    break;
+                if f.seek(SeekFrom::Start(offset)).is_err() {
+                    continue;
                 }
-                if !line.ends_with('\n') {
-                    break; // partial line — wait for the rest
-                }
-                consumed += n as u64;
-                if let Ok(ev) = serde_json::from_str::<Ev>(&line) {
-                    let cwd = ev.cwd.unwrap_or_default();
-                    let sid = ev.session_id.unwrap_or_default();
-                    if let Ok(mut rt) = runtime.lock() {
-                        match ev.event.as_deref() {
-                            Some("start") => rt.handle_start(&sid, &cwd),
-                            Some("reengage") => rt.handle_reengage(&sid, &cwd),
-                            Some("stop") => rt.handle_stop(&sid, &cwd),
-                            Some("wait") => rt.handle_wait(&sid, &cwd),
-                            Some("end") => rt.handle_end(&sid),
-                            _ => {}
+                let mut reader = BufReader::new(f);
+                let mut consumed = offset;
+                loop {
+                    let mut line = String::new();
+                    let n = match reader.read_line(&mut line) {
+                        Ok(n) => n,
+                        Err(_) => break,
+                    };
+                    if n == 0 {
+                        break;
+                    }
+                    if !line.ends_with('\n') {
+                        break; // partial line — wait for the rest
+                    }
+                    consumed += n as u64;
+                    if let Ok(ev) = serde_json::from_str::<Ev>(&line) {
+                        let cwd = ev.cwd.unwrap_or_default();
+                        let sid = ev.session_id.unwrap_or_default();
+                        if let Ok(mut rt) = runtime.lock() {
+                            match ev.event.as_deref() {
+                                Some("start") => rt.handle_start(&sid, &cwd),
+                                Some("reengage") => rt.handle_reengage(&sid, &cwd),
+                                Some("stop") => rt.handle_stop(&sid, &cwd),
+                                Some("wait") => rt.handle_wait(&sid, &cwd),
+                                Some("end") => rt.handle_end(&sid),
+                                _ => {}
+                            }
                         }
                     }
                 }
+                offset = consumed;
             }
-            offset = consumed;
+
+            // Self-compact: the tail only ever consumes NEW bytes, so once the
+            // log is fully drained (`m.len() == offset`) everything in it is dead
+            // weight. Past the cap, reset it to empty. We re-stat first so we
+            // never discard bytes appended during this cycle; a line racing the
+            // truncate lands at the new EOF (hooks append O_APPEND) and is read
+            // next cycle — at worst one stale tick.
+            if offset >= MAX_LOG_BYTES {
+                if let Ok(m) = std::fs::metadata(&path) {
+                    if m.len() == offset {
+                        if let Ok(f) = OpenOptions::new().write(true).open(&path) {
+                            let _ = f.set_len(0);
+                        }
+                        offset = 0;
+                    }
+                }
+            }
         }
     });
 }
