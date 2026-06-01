@@ -107,29 +107,22 @@ pub fn run() {
             }
             let _tray = builder.build(app)?;
 
-            // Always-on-top desktop companion pet (transparent, borderless).
-            let _ = WebviewWindowBuilder::new(app.handle(), "companion", WebviewUrl::App("index.html#/companion".into()))
+            // Always-on-top desktop companion = the live indicator (floats across
+            // Spaces and window switches).
+            if let Ok(w) = WebviewWindowBuilder::new(app.handle(), "companion", WebviewUrl::App("index.html#/companion".into()))
                 .title("Nube")
-                .inner_size(176.0, 160.0)
+                .inner_size(184.0, 170.0)
                 .resizable(false)
                 .decorations(false)
                 .transparent(true)
                 .always_on_top(true)
+                .visible_on_all_workspaces(true)
                 .skip_taskbar(true)
-                .visible(false)
-                .build();
-
-            // Full-screen rescue takeover (shown system-wide when drift escalates).
-            let _ = WebviewWindowBuilder::new(app.handle(), "takeover", WebviewUrl::App("index.html#/takeover".into()))
-                .title("Nube — rescue")
-                .inner_size(900.0, 640.0)
-                .resizable(false)
-                .decorations(false)
-                .transparent(true)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .visible(false)
-                .build();
+                .visible(true)
+                .build()
+            {
+                commands::position_companion(&w);
+            }
 
             Ok(())
         })
@@ -149,8 +142,6 @@ pub fn run() {
             commands::reset_today,
             commands::nube_open_main,
             commands::nube_set_companion,
-            commands::nube_show_takeover,
-            commands::nube_hide_takeover,
             commands::nube_set_paused,
             commands::get_known_apps,
             commands::list_running_apps,

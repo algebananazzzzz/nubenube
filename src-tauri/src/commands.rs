@@ -122,7 +122,7 @@ pub fn reset_today(state: State<AppState>) {
 // ── desktop windows: companion pet + full-screen rescue takeover ──────────
 
 /// Nestle the always-on-top companion into the bottom-right of its monitor.
-fn position_companion(w: &WebviewWindow) {
+pub fn position_companion(w: &WebviewWindow) {
     let mon = w
         .current_monitor()
         .ok()
@@ -157,38 +157,11 @@ pub fn nube_set_companion(app: AppHandle, visible: bool) {
     if let Some(w) = app.get_webview_window("companion") {
         if visible {
             let _ = w.set_always_on_top(true);
-            position_companion(&w);
+            let _ = w.set_visible_on_all_workspaces(true);
             let _ = w.show();
         } else {
             let _ = w.hide();
         }
-    }
-}
-
-#[tauri::command]
-pub fn nube_show_takeover(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("takeover") {
-        // cover the monitor the user is actually on (cursor), not always primary
-        let mon = app
-            .cursor_position()
-            .ok()
-            .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
-            .or_else(|| w.current_monitor().ok().flatten())
-            .or_else(|| w.primary_monitor().ok().flatten());
-        if let Some(mon) = mon {
-            let _ = w.set_position(*mon.position());
-            let _ = w.set_size(*mon.size());
-        }
-        let _ = w.set_always_on_top(true);
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
-}
-
-#[tauri::command]
-pub fn nube_hide_takeover(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("takeover") {
-        let _ = w.hide();
     }
 }
 
