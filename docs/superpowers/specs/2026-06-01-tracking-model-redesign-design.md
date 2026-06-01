@@ -221,17 +221,20 @@ Closing a Claude session (Ctrl+D, or Ctrl+C that exits) must **immediately** dro
 it from the running/waiting counts so the overlay never shows a phantom
 "waiting"/"working" for a session you've left.
 
-- `SessionEnd` is already wired (`events_tail` → `handle_end` → removes the
-  session). Keep this path; verify it reaches the map for every exit reason.
-- **Fallback (in case some exits don't fire `SessionEnd`):** a subagent is
-  confirming Claude Code's hook behavior. If exits can miss `SessionEnd`, lower
-  the stale-session eviction (`ABANDON_SECS`, currently 1800s) and/or treat a
-  session whose process is gone as ended. Implement whatever the hook findings
-  require; the user-visible contract is: **close it → it leaves the counts within
-  a tick or two.**
-- An interrupted-but-not-exited turn (Ctrl+C mid-response) should move
-  `Running → Waiting` if `Stop` fires, else stay until the (lowered) staleness
-  bound. Confirm against the hook findings.
+**Confirmed hook behavior (Claude Code docs):**
+- **Ctrl+D** → `SessionEnd` (`reason: prompt_input_exit`) → `handle_end` removes it.
+- **Ctrl+C that exits** → `SessionEnd` (`reason: other`) → removed.
+- **Ctrl+C/Esc interrupt mid-turn** → `Stop` fires (session stays alive) →
+  `Running → Waiting`. `SessionEnd` does NOT fire (correct — session continues).
+- **Force-kill (SIGKILL) / abrupt terminal close** → `SessionEnd` is NOT
+  guaranteed → needs an app-side fallback.
+
+**Implemented:** the existing `events_tail → handle_end` path satisfies the user's
+ask (Ctrl+D / Ctrl+C remove the session immediately). For the force-kill gap, the
+staleness fallback `ABANDON_SECS` is lowered **1800s → 600s** (its clock is frozen
+while idle/away, so it's active-waiting time): a killed terminal stops being a
+phantom "waiting"/"working" within ~10 min instead of 30. User-visible contract:
+**close it → it leaves the counts within a tick or two.**
 
 ## 13. Implementation contract (fixed names — parallel agents implement to this)
 
