@@ -134,7 +134,7 @@ pub fn position_companion(w: &WebviewWindow) {
         let mpos = mon.position();
         let win = w
             .outer_size()
-            .unwrap_or_else(|_| PhysicalSize::new((176.0 * scale) as u32, (160.0 * scale) as u32));
+            .unwrap_or_else(|_| PhysicalSize::new((196.0 * scale) as u32, (214.0 * scale) as u32));
         let margin = (24.0 * scale) as i32;
         let dock = (40.0 * scale) as i32; // clear the macOS dock / taskbar
         let x = mpos.x + msize.width as i32 - win.width as i32 - margin;

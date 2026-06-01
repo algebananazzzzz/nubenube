@@ -111,7 +111,7 @@ pub fn run() {
             // Spaces and window switches).
             if let Ok(w) = WebviewWindowBuilder::new(app.handle(), "companion", WebviewUrl::App("index.html#/companion".into()))
                 .title("Nube")
-                .inner_size(184.0, 170.0)
+                .inner_size(196.0, 214.0)
                 .resizable(false)
                 .decorations(false)
                 .transparent(true)

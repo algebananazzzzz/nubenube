@@ -237,6 +237,10 @@ impl DriftRuntime {
             .map(|s| (s.project_id.clone(), (now - s.since).as_secs()))
             .collect();
         let (waiting_count, per_project, longest) = waiting_load(&waiting_list, grace);
+        // waiting_count = sessions PAST grace (drives decay); waiting_total = ALL
+        // waiting sessions — shown immediately so the buddy reacts the instant
+        // Claude finishes (the countdown displays during grace, just paused).
+        let waiting_total = waiting_list.len() as i64;
         let running_count = self
             .sessions
             .values()
@@ -301,8 +305,8 @@ impl DriftRuntime {
                     // is a no-op until the table exists.
                     db::add_drift_by_app(c, &today, &snap.app_name, dts);
                 }
-            } else if waiting_count > 0 {
-                self.state = "waiting".to_string(); // session waiting, you're attending
+            } else if waiting_total > 0 {
+                self.state = "waiting".to_string(); // a session is waiting (incl. grace) — react now
             } else if new_tokens > 0 {
                 self.state = "growing".to_string(); // Claude actively working for you
                 if let (Some(c), Some(pid)) = (&conn, self.project_id.clone()) {
@@ -319,7 +323,7 @@ impl DriftRuntime {
         }
 
         // gentle drift-moment: once per session, after grace + sustained drift
-        let seconds_to_death = seconds_to_death(self.health, waiting_count, s.sensitivity.decay_per_min);
+        let seconds_to_death = seconds_to_death(self.health, waiting_total, s.sensitivity.decay_per_min);
         if self.state == "drifting" {
             let mut fire = false;
             for w in self.sessions.values_mut().filter(|s| s.phase == SessionPhase::Waiting) {
@@ -330,14 +334,14 @@ impl DriftRuntime {
                 }
             }
             if fire {
-                let _ = app.emit("drift-moment", self.build_tick(&snap, class, longest, waiting_count, running_count, seconds_to_death));
+                let _ = app.emit("drift-moment", self.build_tick(&snap, class, longest, waiting_total, running_count, seconds_to_death));
                 if s.drift_moment_intensity != "passive" {
                     notify::drift(app, &snap.app_name, &self.project_name);
                 }
             }
         }
 
-        let _ = app.emit("focus-tick", self.build_tick(&snap, class, longest, waiting_count, running_count, seconds_to_death));
+        let _ = app.emit("focus-tick", self.build_tick(&snap, class, longest, waiting_total, running_count, seconds_to_death));
     }
 
     fn build_tick(
