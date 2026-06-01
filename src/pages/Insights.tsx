@@ -47,6 +47,7 @@ export function Insights() {
 
   const focusSecs = insights?.claudeActiveSecs ?? 0
   const driftSecs = insights?.driftSecs ?? 0
+  const breakdown = insights?.distractionBreakdown ?? []
   const streak = insights?.longestFocusStreakSecs ?? 0
   const msgs = projects.reduce((s, p) => s + p.msgCount, 0)
 
@@ -87,9 +88,36 @@ export function Insights() {
 
         {/* honest stat cards (range-scoped) */}
         <div style={{ display: 'flex', gap: 12, flexShrink: 0 }}>
-          <StatCard label="time focused" value={formatDuration(focusSecs)} sub={`Claude working · this ${range}`} color="#2f8a76" />
-          <StatCard label="Claude waited" value={formatDuration(driftSecs)} sub="while you'd drifted away" color="var(--danger)" />
+          <StatCard label="time Claude worked" value={formatDuration(focusSecs)} sub={`tokens flowing · this ${range}`} color="#2f8a76" />
+          <StatCard label="time drifted" value={formatDuration(driftSecs)} sub="distraction while Claude waited" color="var(--danger)" />
           <StatCard label="longest focus" value={formatDuration(streak)} sub="best unbroken stretch" color="#6a4aa8" />
+        </div>
+
+        {/* time lost to distractions (per app, range-scoped) */}
+        <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 18, border: elev.border, boxShadow: shadow.md, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: 12.5, color: SUB, letterSpacing: '.02em' }}>TIME LOST TO DISTRACTIONS · this {range}</div>
+            <span className="nn-num" style={{ fontWeight: 800, fontSize: 14, color: 'var(--danger)' }}>{formatDuration(driftSecs)}</span>
+          </div>
+          <div style={{ fontWeight: 600, fontSize: 11.5, color: FAINT, marginBottom: 10 }}>only counts time on apps you tagged as distractions while Claude was waiting</div>
+          {breakdown.length === 0 ? (
+            <div style={{ fontWeight: 600, fontSize: 12.5, color: FAINT, padding: '6px 0' }}>no drift yet — nice 💚</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {breakdown.map((b, i) => {
+                const max = breakdown[0]?.secs || 1
+                return (
+                  <div key={b.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 2px', borderTop: i === 0 ? 'none' : '1px solid rgba(120,100,170,.1)' }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: INK, width: 140, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</span>
+                    <div style={{ flex: 1, height: 8, borderRadius: 99, background: 'rgba(120,100,170,.12)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.max(4, (b.secs / max) * 100)}%`, background: 'linear-gradient(90deg, hsl(28 80% 62%), hsl(8 78% 60%))' }} />
+                    </div>
+                    <span className="nn-num" style={{ fontWeight: 800, fontSize: 12.5, color: 'var(--danger)', width: 64, textAlign: 'right' }}>{formatDuration(b.secs)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* token composition + focus · all projects */}
