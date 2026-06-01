@@ -34,6 +34,24 @@ npm run dev
 
 Build: `npm run tauri build`. Rust tests: `cargo test --manifest-path src-tauri/Cargo.toml`.
 
+## Install
+
+Download the latest release from the [GitHub Releases page](https://github.com/OWNER/nubenube/releases).
+
+| Platform | File |
+|---|---|
+| Linux (Ubuntu/Debian) | `.deb` |
+| Linux (universal) | `.AppImage` — run `chmod +x` then execute |
+| macOS | `.dmg` |
+| Windows | `.msi` or `.exe` (NSIS installer) |
+
+**macOS note:** The `.dmg` is unsigned. On first open, right-click the app → **Open** to bypass Gatekeeper. You only need to do this once — subsequent auto-updates are silent.
+
+## Releases
+
+- **Beta** (`vX.Y.Z-beta`): published automatically on every merge to `main`. Install to test before stable.
+- **Stable** (`vX.Y.Z`): promoted manually via GitHub Actions → `4 - Production Release`. Existing installs auto-update silently.
+
 ## The water model (real, research-grounded)
 
 Water is a **real volume** derived from token counts. Reading is ~10× cheaper than writing:
@@ -107,3 +125,14 @@ Every screen falls back to mock data when not connected, so the UI is always nav
 - Linux Wayland active-window is best-effort (app-level fallback); transparent companion needs a
   compositor. Multi-monitor takeover currently targets the primary/active monitor.
 - Mobile companion + site blocking (phase 2).
+
+## Contributing — first-time release setup
+
+Before the release workflows can sign and publish builds, you need a signing keypair:
+
+1. Generate the ed25519 keypair: `cargo tauri signer generate -w ~/.tauri/nubenube.key`
+2. Copy the public key printed to stdout into `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`
+3. Update the `endpoints` URL in `src-tauri/tauri.conf.json` → `plugins.updater.endpoints[0]` with the real GitHub `OWNER/repo` path
+4. Add two GitHub repo secrets (Settings → Secrets and variables → Actions):
+   - `TAURI_SIGNING_PRIVATE_KEY` — contents of `~/.tauri/nubenube.key`
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — the passphrase you chose
