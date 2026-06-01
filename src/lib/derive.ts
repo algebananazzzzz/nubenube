@@ -25,7 +25,7 @@ export type SkyState =
   | 'faint'
   | 'mint'
 
-// The live "home" phase. Derived from a FocusTick; drives Home, Companion, Takeover.
+// The live "home" phase. Derived from a FocusTick; drives Home, Companion.
 export type Phase = 'working' | 'idle' | 'waiting' | 'draining' | 'critical' | 'fading' | 'faint'
 
 export const BASE_LIFE = 70 // cloudHealth resets daily to 0.70 → 70% base life

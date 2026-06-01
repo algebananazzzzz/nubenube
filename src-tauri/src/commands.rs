@@ -119,7 +119,7 @@ pub fn reset_today(state: State<AppState>) {
     }
 }
 
-// ── desktop windows: companion pet + full-screen rescue takeover ──────────
+// ── desktop companion window ──────────────────────────────────────────────
 
 /// Nestle the always-on-top companion into the bottom-right of its monitor.
 pub fn position_companion(w: &WebviewWindow) {

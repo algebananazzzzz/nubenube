@@ -1,7 +1,7 @@
-// AppShell — the main window: custom titlebar, sidebar nav, the live home-bloop
-// life widget, and the rescue SUPERVISOR that drives the real OS takeover +
-// companion windows from live focus-ticks. Also hosts the first-launch intro and
-// (on sample data) a demo dock to preview the rare phases without drifting.
+// AppShell — the main window: custom titlebar, sidebar nav, and the live
+// home-bloop life widget. The companion pref drives the always-on-top desktop
+// companion window. Also hosts the first-launch intro and (on sample data) a
+// demo dock to preview the rare phases without drifting.
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
