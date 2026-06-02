@@ -25,3 +25,6 @@ src-tauri/target/
 *.njsproj
 *.sln
 *.sw?
+
+# Superpowers working notes (specs/plans) — not part of the shipped repo
+docs/superpowers/
