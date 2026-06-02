@@ -1,9 +1,17 @@
 //! Native notifications (gentle, never shaming).
 
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+#[cfg(not(target_os = "macos"))]
+use tauri::Emitter; // only `app.emit` (non-macOS sound path) needs it
 use tauri_plugin_notification::NotificationExt;
 
 pub fn drift(app: &AppHandle, app_name: &str, project: &str, sound_name: Option<&str>, sound_path: Option<&str>) {
+    // Each arg is consumed on only one platform; quiet the other so `-D warnings` passes.
+    #[cfg(not(target_os = "macos"))]
+    let _ = sound_name;
+    #[cfg(target_os = "macos")]
+    let _ = sound_path;
+
     let body = if project.is_empty() {
         format!("You've wandered to {app_name}. Your Nube is fading a little — come back when you can. ☁️")
     } else {
