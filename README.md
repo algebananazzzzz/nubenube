@@ -37,7 +37,7 @@ data and watches which app is in front, and nothing leaves your machine.
 ## Install
 
 Download the build for your platform from the
-[Releases page](https://github.com/OWNER/nubenube/releases):
+[Releases page](https://github.com/algebananazzzzz/nubenube/releases):
 
 | Platform | File | Notes |
 |---|---|---|
