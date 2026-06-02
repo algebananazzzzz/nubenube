@@ -9,6 +9,7 @@ import { api } from '../lib/api'
 import { checkForUpdates } from '../lib/updater'
 import { armChimeUnlock, playChime, CHIME_VOICES, type ChimeVoice } from '../lib/chime'
 import { Card, Pill, Btn, Dot, Toggle, SegTabs } from '../components/ui'
+import { version } from '../../package.json'
 
 const VOICE_LABEL: Record<ChimeVoice, string> = {
   bell: 'Bell', marimba: 'Marimba', chord: 'Chord', koto: 'Koto', blip: 'Blip',
@@ -296,7 +297,7 @@ export function Settings() {
             <PrefRow title="Daily reset" desc="Life resets to 100% at this time.">
               <input type="time" value={settings.resetTimeLocal} onChange={(e) => void save({ resetTimeLocal: e.target.value })} className="nn-num" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '7px 11px', colorScheme: theme }} />
             </PrefRow>
-            <PrefRow title="Updates" desc="Stable is the safe track; Beta gets new builds first." last>
+            <PrefRow title="Updates" desc={`v${version}`} last>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <SegTabs<UpdateChannel> tabs={[{ key: 'stable', label: 'Stable' }, { key: 'beta', label: 'Beta' }]} value={updateChannel} onChange={(v) => setPref('updateChannel', v)} size="sm" />
                 <Btn variant="line" size="sm" onClick={() => void onCheckUpdates()} disabled={checking}>{checking ? 'Checking…' : 'Check'}</Btn>

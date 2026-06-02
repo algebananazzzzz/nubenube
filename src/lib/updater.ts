@@ -9,7 +9,10 @@ type UpdateInfo = { version: string; current: string; notes: string | null };
 // `manual` surfaces "you're up to date" / failure feedback for the Settings
 // button; the launch check stays silent.
 export async function checkForUpdates(opts?: { manual?: boolean }): Promise<void> {
-  if (import.meta.env.DEV) return;
+  if (import.meta.env.DEV) {
+    if (opts?.manual) alert('Update checks are disabled in dev builds.');
+    return;
+  }
   if (getCurrentWebviewWindow().label !== 'main') return;
   const channel = usePrefs.getState().updateChannel;
   try {
