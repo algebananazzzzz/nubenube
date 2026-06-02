@@ -244,7 +244,7 @@ pub fn list_running_apps() -> Vec<String> {
             let mut v: Vec<String> = s
                 .lines()
                 .filter_map(|l| l.split_whitespace().nth(2)) // WM_CLASS col
-                .filter_map(|c| c.split('.').last())
+                .filter_map(|c| c.split('.').next_back())
                 .map(|x| x.to_string())
                 .collect();
             v.sort();
