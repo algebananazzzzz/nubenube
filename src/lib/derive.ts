@@ -127,7 +127,7 @@ export function useNube(): NubeState {
   const tick = useFocus((s) => s.tick)
   const theme = usePrefs((s) => s.theme)
 
-  const life = tick.cloudHealth
+  const rawLife = tick.cloudHealth
   const baseline = tick.baseline || BASELINE
   const cap = tick.cap || CAP
   const effState = tick.state
@@ -138,18 +138,29 @@ export function useNube(): NubeState {
   const distract = tick.distractSecsToday ?? 0
   const hue = tick.colorHue || DEFAULT_HUE
 
+  // Health and the countdown are one quantity, viewed two ways. The backend sets
+  // secondsToDeath = life/|rate|, so life is linear in time-left and hits 0 exactly
+  // when the timer does. During drift we therefore drive the shown `life` from the
+  // live countdown so the % meter and the timer tick down together each second,
+  // rather than the meter lagging the backend's ~2s ticks: liveLife == rawLife at
+  // every backend anchor and falls at exactly the backend drain rate between them.
+  const secondsToDeath = tick.secondsToDeath ?? null
+  const losing = !paused && effState === 'drifting' && secondsToDeath != null
+  const remaining = useCountdown(losing ? secondsToDeath : null, losing)
+  const life = losing && secondsToDeath && remaining != null
+    ? Math.max(0, rawLife * (remaining / secondsToDeath))
+    : rawLife
+  // Bar = the same life as a fraction of full (cap) life: depletes in lock-step
+  // with the meter and reads full at the 130% cap.
+  const countdownPct = losing ? Math.max(0, Math.min(1, life / cap)) : 0
+  const fainting = remaining != null && remaining <= 0
+
   const { satMul, ltAdd } = moodDrain(life)
   const clay = hueClay(hue, satMul, ltAdd)
   const mood: Mood = paused
     ? (life >= 100 ? 'content' : life >= 55 ? 'worried' : 'fading')
     : deriveMood(life, cap)
   const sky = paused ? 'calm' : deriveSky(life, effState)
-
-  const secondsToDeath = tick.secondsToDeath ?? null
-  const losing = !paused && effState === 'drifting' && secondsToDeath != null
-  const remaining = useCountdown(losing ? secondsToDeath : null, losing)
-  const countdownPct = losing && secondsToDeath ? Math.max(0, (remaining ?? 0) / secondsToDeath) : 0
-  const fainting = remaining != null && remaining <= 0
 
   // Anchored to the backend totals; ticks locally each second while the state is
   // active so the Home clocks advance smoothly between ~2s backend updates.
