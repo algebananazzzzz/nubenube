@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::settings::Settings;
 use crate::{connector, db, dto::*, hooks_installer, store_paths};
@@ -319,4 +320,62 @@ pub fn list_running_apps() -> Vec<String> {
         }
     }
     Vec::new()
+}
+
+// ── self-update (channel-aware) ───────────────────────────────────────────
+
+/// The updater plugin bakes a single endpoint in at build time and can't switch
+/// it from JS, so the channel is resolved here per call. Beta tracks every
+/// `-beta` prerelease through a fixed `beta` release that CI keeps pointed at the
+/// newest manifest; stable tracks the latest non-prerelease.
+fn channel_manifest(channel: &str) -> &'static str {
+    match channel {
+        "beta" => "https://github.com/algebananazzzzz/nubenube/releases/download/beta/latest.json",
+        _ => "https://github.com/algebananazzzzz/nubenube/releases/latest/download/latest.json",
+    }
+}
+
+#[derive(Serialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub current: String,
+    pub notes: Option<String>,
+}
+
+fn build_updater(app: &AppHandle, channel: &str) -> Result<tauri_plugin_updater::Updater, String> {
+    let url = tauri::Url::parse(channel_manifest(channel)).map_err(|e| e.to_string())?;
+    app.updater_builder()
+        .endpoints(vec![url])
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle, channel: String) -> Result<Option<UpdateInfo>, String> {
+    let update = build_updater(&app, &channel)?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(update.map(|u| UpdateInfo {
+        version: u.version.clone(),
+        current: u.current_version.clone(),
+        notes: u.body.clone(),
+    }))
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle, channel: String) -> Result<(), String> {
+    if let Some(update) = build_updater(&app, &channel)?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        update
+            .download_and_install(|_chunk: usize, _total: Option<u64>| {}, || {})
+            .await
+            .map_err(|e| e.to_string())?;
+        app.restart();
+    }
+    Ok(())
 }

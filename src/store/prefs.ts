@@ -5,6 +5,7 @@ import { create } from 'zustand'
 import { CHIME_VOICES, type ChimeVoice } from '../lib/chime'
 
 export type Theme = 'dark' | 'light'
+export type UpdateChannel = 'stable' | 'beta'
 
 export type Prefs = {
   theme: Theme
@@ -13,6 +14,7 @@ export type Prefs = {
   chimeVolume: number // 0..1
   companion: boolean
   companionMini: boolean
+  updateChannel: UpdateChannel // which release track the in-app updater follows
 }
 
 const DEFAULTS: Prefs = {
@@ -22,14 +24,16 @@ const DEFAULTS: Prefs = {
   chimeVolume: 0.6,
   companion: true,
   companionMini: false,
+  updateChannel: 'stable',
 }
 
-// localStorage is untyped — coerce a persisted voice back into the known set.
+// localStorage is untyped — coerce persisted enums back into their known sets.
 function normalize(p: Prefs): Prefs {
   return {
     ...p,
     chimeVoice: CHIME_VOICES.includes(p.chimeVoice) ? p.chimeVoice : DEFAULTS.chimeVoice,
     chimeVolume: Math.max(0, Math.min(1, Number(p.chimeVolume) || DEFAULTS.chimeVolume)),
+    updateChannel: p.updateChannel === 'beta' ? 'beta' : 'stable',
   }
 }
 

@@ -130,3 +130,24 @@ jobs:
         run: |
           git tag v${{ needs.bump-version.outputs.new_version }}
           git push origin v${{ needs.bump-version.outputs.new_version }}
+
+  # The in-app beta channel reads a fixed URL; repoint it at the manifest this
+  # run just published so beta installs roll forward automatically.
+  mirror-beta-channel:
+    needs: [bump-version, build-beta]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repoint the `beta` release at the newest manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          V: ${{ needs.bump-version.outputs.new_version }}
+        run: |
+          gh release download "v${V}-beta" --pattern latest.json --output latest.json --clobber
+          # A stable URL for the beta channel: /releases/download/beta/latest.json.
+          # Kept as a prerelease so it never becomes /releases/latest (the stable channel).
+          if ! gh release view beta >/dev/null 2>&1; then
+            gh release create beta --prerelease --title "Beta channel" \
+              --notes "Rolling pointer to the newest beta build's updater manifest. Managed by CI — do not delete."
+          fi
+          gh release upload beta latest.json --clobber
