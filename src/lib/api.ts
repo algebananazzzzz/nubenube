@@ -1,6 +1,5 @@
-// The single bridge to the native (Rust) side. Every call gracefully falls back
-// to the mock layer when a command is missing or we're running in a plain
-// browser (vite dev without Tauri), so the UI is always navigable.
+// Bridge to the native (Rust) side. Every call falls back to mock data when the
+// command is missing or running outside Tauri, so the UI is always navigable.
 
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -58,6 +57,10 @@ export const api = {
     call<ProjectDetail | null>('get_project_detail', { id, range }, () => mockProjectDetail(id, range)),
   getKnownApps: () => call<KnownApp[]>('get_known_apps', {}, () => mockKnownApps),
   listRunningApps: () => call<string[]>('list_running_apps', {}, () => mockKnownApps.map((a) => a.name)),
+  installNotificationSound: (data: Uint8Array, ext: string) =>
+    call<{ name: string; path: string }>('install_notification_sound', { data: Array.from(data), ext }, () => ({ name: '', path: '' })),
+  removeNotificationSound: () =>
+    call<void>('remove_notification_sound', {}, () => undefined),
 }
 
 async function subscribe<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {
@@ -71,5 +74,4 @@ async function subscribe<T>(event: string, cb: (payload: T) => void): Promise<Un
 
 export const events = {
   onFocusTick: (cb: (t: FocusTick) => void) => subscribe<FocusTick>('focus-tick', cb),
-  onDriftMoment: (cb: (t: FocusTick) => void) => subscribe<FocusTick>('drift-moment', cb),
 }

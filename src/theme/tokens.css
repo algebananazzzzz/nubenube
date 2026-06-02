@@ -1,57 +1,40 @@
-/* ─────────────────────────────────────────────────────────────
-   NubeNube · design tokens — Helios edition
-   A flat, calm, infrastructure-grade system inspired by HashiCorp
-   Helios: neutral surfaces, hairline alpha-gray borders, small radii,
-   a single accent (per-project hue, JS-injected) used sparingly, and
-   Helios' semantic status colors (success / warning / critical).
-   Dark is the default theme; light is a true Helios light surface set.
-   ───────────────────────────────────────────────────────────── */
+/* Design tokens. Neutral surfaces, hairline borders, small radii, one
+   JS-injected accent, and semantic status colors. Dark is the default theme;
+   accent + clay vars are injected per window root at runtime (see clay.ts). */
 
 :root {
   --font-ui:   ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-disp: var(--font-ui);
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  /* radii — Helios keeps these small and flat */
-  --r-sm: 5px; --r-md: 6px; --r-lg: 8px; --r-xl: 10px; --r-pill: 999px;
+  /* radii — small and flat */
+  --r-sm: 5px; --r-md: 6px; --r-lg: 8px; --r-pill: 999px;
 
   /* motion */
   --ease: cubic-bezier(.3, .7, .4, 1);
   --ease-soft: cubic-bezier(.32, .72, .3, 1);
 
-  /* ── LIGHT theme — Helios semantic surfaces ─────────────────── */
-  --canvas: #f1f2f3;                 /* desktop / app backdrop (neutral-100) */
+  /* ── LIGHT theme — semantic surfaces ────────────────────────── */
+  --canvas: #f1f2f3;                 /* desktop / app backdrop */
   --page: #ffffff;                   /* page-primary */
-  --page-faint: #fafafa;             /* page-faint */
 
   --surface:        #ffffff;         /* surface-primary — cards */
   --surface-faint:  #fafafa;         /* surface-faint — secondary fills */
   --surface-strong: #eeeefc;         /* surface-strong — insets / tracks */
   --surface-hover:  #ededfc;         /* surface-interactive-hover */
-  --surface-active: #dcdcf5;         /* surface-interactive-active */
 
   --ink:   #0c0c0e;                  /* foreground-strong */
   --text:  #3b3d45;                  /* foreground-primary */
   --faint: #656a76;                  /* foreground-faint */
-  --disabled: #8c909c;
 
   --line:        #656a7633;          /* border-primary */
   --line-faint:  #656a761a;          /* border-faint */
   --line-strong: #3b3d4566;          /* border-strong */
-  --border: 1px solid var(--line);
 
-  --fill-1: #fafafa;
-  --fill-2: #f1f2f3;
-
-  /* status — Helios values (success / warning / critical) */
-  --success:        #008a22; --success-on: #00781e; --success-surface: #f2fbf6; --success-border: #cceeda;
-  --warning:        #bb5a00; --warning-on: #9e4b00; --warning-surface: #fff9e8; --warning-border: #fbeabf;
+  /* status — success / warning / critical (-on = darker hover for critical btn) */
+  --success:        #008a22; --success-surface: #f2fbf6; --success-border: #cceeda;
+  --warning:        #bb5a00; --warning-surface: #fff9e8; --warning-border: #fbeabf;
   --critical:       #e52228; --critical-on: #c00005; --critical-surface: #fff5f5; --critical-border: #fbd4d4;
-
-  /* convenience aliases used across the app */
-  --mint: var(--success-on);  --mint-soft: var(--success-surface);
-  --amber: var(--warning-on); --amber-soft: var(--warning-surface);
-  --danger: var(--critical-on); --danger-soft: var(--critical-surface);
 
   /* focus state colors */
   --teal: #0d9488;   /* chillin — relaxed, off-task but nothing blocked */
@@ -75,38 +58,27 @@
   --clay-deep: #6262cc; --clay-ink: #3e3e96; --clay-cheek: #c4a8e6;
 }
 
-/* ── DARK · the default theme (Helios-flavored, flat) ───────────── */
+/* ── DARK · the default theme (flat) ────────────────────────────── */
 [data-theme="dark"] {
   --canvas: #0c0d10;
   --page: #16171a;
-  --page-faint: #131418;
 
   --surface:        #1c1d22;
   --surface-faint:  #181a1e;
   --surface-strong: #252534;
   --surface-hover:  #23243a;
-  --surface-active: #2c2d48;
 
   --ink:   #ffffff;
   --text:  #d3d6dc;
   --faint: #9aa0ac;
-  --disabled: #6b7080;
 
   --line:        rgba(160,166,178,.20);
   --line-faint:  rgba(160,166,178,.11);
   --line-strong: rgba(214,218,226,.30);
-  --border: 1px solid var(--line);
 
-  --fill-1: #202227;
-  --fill-2: #26282e;
-
-  --success:        #4ec77a; --success-on: #6fd996; --success-surface: rgba(0,138,34,.15);  --success-border: rgba(78,199,122,.34);
-  --warning:        #e0922e; --warning-on: #eaa54a; --warning-surface: rgba(187,90,0,.18);  --warning-border: rgba(224,146,46,.34);
+  --success:        #4ec77a; --success-surface: rgba(0,138,34,.15);  --success-border: rgba(78,199,122,.34);
+  --warning:        #e0922e; --warning-surface: rgba(187,90,0,.18);  --warning-border: rgba(224,146,46,.34);
   --critical:       #f4716f; --critical-on: #f78b89; --critical-surface: rgba(229,34,40,.16); --critical-border: rgba(244,113,111,.34);
-
-  --mint: var(--success); --mint-soft: var(--success-surface);
-  --amber: var(--warning); --amber-soft: var(--warning-surface);
-  --danger: var(--critical); --danger-soft: var(--critical-surface);
 
   --teal: #2dd4bf;
   --calm: #6668a8;
@@ -137,11 +109,6 @@
   color: var(--faint);
 }
 
-/* accent-colored text (was a gradient; now a solid Helios accent) */
-.nn-grad { color: var(--accent-text); }
-
-* { box-sizing: border-box; }
-
 .nn-app {
   font-family: var(--font-ui);
   color: var(--text);
@@ -153,17 +120,12 @@
 @keyframes nn-bob   { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
 @keyframes nn-blink { 0%,93%,100% { transform: scaleY(1) } 96% { transform: scaleY(.1) } }
 @keyframes nn-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
-@keyframes nn-rise  { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
+/* companion enter: grows from the top-right corner downward/leftward */
+@keyframes nn-from-tr { from { opacity: 0; transform: scale(0.75) translate(8px, -8px) } to { opacity: 1; transform: none } }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; }
 }
-
-/* native range fallback — Helios-flat track + thumb */
-.nn-range { -webkit-appearance: none; appearance: none; height: 22px; background: transparent; cursor: pointer; }
-.nn-range::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: var(--surface-strong); }
-.nn-range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); margin-top: -6px; box-shadow: var(--shadow-sm); transition: transform .12s var(--ease); }
-.nn-range::-webkit-slider-thumb:hover { transform: scale(1.1); }
 
 /* bare range — native track + thumb fully hidden; a custom thumb/track is
    drawn over it (used by the Settings sliders) */

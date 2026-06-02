@@ -467,7 +467,13 @@ impl DriftRuntime {
             if fire {
                 let _ = app.emit("drift-moment", self.build_tick(&snap, waiting_total, running_count, seconds_to_death, frozen));
                 if s.drift_moment_intensity != "passive" {
-                    notify::drift(app, &snap.app_name, &self.project_name);
+                    notify::drift(
+                        app,
+                        &snap.app_name,
+                        &self.project_name,
+                        s.notification_sound_name.as_deref(),
+                        s.notification_sound_path.as_deref(),
+                    );
                 }
             }
         }

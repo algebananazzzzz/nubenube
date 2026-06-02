@@ -1,5 +1,5 @@
-// ProjectDetail — one project's token composition, filterable by
-// day / week / month / all-time. Slim by design. From get_project_detail.
+// ProjectDetail: one project's identity + range-filtered token composition.
+// Fetches get_project_detail on id/range change.
 
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'

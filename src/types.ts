@@ -1,7 +1,4 @@
-// Shared domain types — mirror the Rust DTOs (serde camelCase). Trimmed to only
-// what the Helios redesign renders: life/focus tick, lifetime water+tokens,
-// range-scoped focus + distraction breakdown + token composition, the project
-// list, and connection/settings.
+// Shared domain types; mirror the Rust DTOs (serde camelCase).
 
 export type TokenBreakdown = {
   input: number
@@ -91,6 +88,8 @@ export type Settings = {
   driftMomentIntensity: 'passive' | 'gentle-notification' | 'overlay'
   waterRates: { read: number; write: number }
   logRoots: string[]
+  notificationSoundName: string | null
+  notificationSoundPath: string | null
 }
 
 export type KnownApp = { name: string; lastSeen: string }

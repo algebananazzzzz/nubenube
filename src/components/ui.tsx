@@ -1,5 +1,4 @@
-// ui.tsx — NubeNube primitives (Helios edition). Flat surfaces, hairline
-// borders, small radii, status colors used with intent. Ported from ui.jsx.
+// Shared UI primitives. Colors/radii/shadows come from theme/tokens.css vars.
 
 import { useState, type CSSProperties, type ReactNode } from 'react'
 
@@ -29,7 +28,7 @@ export function Card({ children, style, pad = 20, soft, onClick, hoverable }: {
 
 type Tone = 'neutral' | 'soft' | 'accent' | 'ghost' | 'mint' | 'amber' | 'danger'
 
-// Helios-style Badge. tone: neutral | accent | mint | amber | danger
+// `tone` overrides `kind`; both index the same palette map.
 export function Pill({ children, kind = 'neutral', tone, style }: {
   children: ReactNode; kind?: Tone; tone?: Tone; style?: CSSProperties
 }) {
@@ -55,7 +54,6 @@ export function Pill({ children, kind = 'neutral', tone, style }: {
 
 type Variant = 'primary' | 'line' | 'soft' | 'ghost' | 'critical'
 
-// Helios Button. variant: primary | line (secondary) | soft | ghost | critical
 export function Btn({ children, variant = 'primary', size = 'md', onClick, style, disabled, full }: {
   children: ReactNode; variant?: Variant; size?: 'sm' | 'md' | 'lg'
   onClick?: () => void; style?: CSSProperties; disabled?: boolean; full?: boolean
@@ -85,7 +83,7 @@ export function Btn({ children, variant = 'primary', size = 'md', onClick, style
   )
 }
 
-// status dot — flat, optional gentle pulse (no glow)
+// Status dot; `pulse` draws an expanding ring via the nn-pulse keyframe.
 export function Dot({ tone = 'var(--success)', size = 8, pulse }: { tone?: string; size?: number; pulse?: boolean }) {
   return (
     <span style={{ position: 'relative', display: 'inline-flex', width: size, height: size }}>
@@ -95,17 +93,7 @@ export function Dot({ tone = 'var(--success)', size = 8, pulse }: { tone?: strin
   )
 }
 
-export function Meter({ value = 0.5, tone = 'var(--accent)', h = 6, track = 'var(--surface-strong)' }: {
-  value?: number; tone?: string; h?: number; track?: string
-}) {
-  return (
-    <div style={{ height: h, borderRadius: 999, background: track, overflow: 'hidden' }}>
-      <div style={{ width: `${Math.max(0, Math.min(1, value)) * 100}%`, height: '100%', background: tone, borderRadius: 999, transition: 'width .6s var(--ease)' }} />
-    </div>
-  )
-}
-
-// ── LifeBar — the hero meter. 0..cap; baseline ("start · 100") marker.
+// 0..cap meter; tone keyed off life vs baseline; renders the baseline marker.
 export function LifeBar({ life, baseline = 100, cap = 130, height = 10, labels = true }: {
   life: number; baseline?: number; cap?: number; height?: number; labels?: boolean
 }) {
@@ -117,11 +105,8 @@ export function LifeBar({ life, baseline = 100, cap = 130, height = 10, labels =
   return (
     <div style={{ position: 'relative' }}>
       <div style={{ position: 'relative', height, borderRadius: 999, overflow: 'hidden', background: 'var(--surface-strong)' }}>
-        {/* over-baseline zone — faint hatch */}
         <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${basePct}%`, right: 0, background: 'var(--success-surface)' }} />
-        {/* fill */}
         <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: tone, borderRadius: 999, transition: 'width .6s var(--ease)' }} />
-        {/* baseline marker */}
         <div style={{ position: 'absolute', top: -2, bottom: -2, left: `${basePct}%`, width: 2, background: 'var(--ink)', opacity: .35 }} />
       </div>
       {labels && (
@@ -135,33 +120,7 @@ export function LifeBar({ life, baseline = 100, cap = 130, height = 10, labels =
   )
 }
 
-// ── SplitBar — focused (success) vs distracted (warning) ─────────
-export function SplitBar({ pct, height = 10 }: { pct: number; height?: number }) {
-  return (
-    <div style={{ display: 'flex', height, borderRadius: 999, overflow: 'hidden', background: 'var(--warning-surface)' }}>
-      <div style={{ width: `${pct * 100}%`, background: 'var(--success)', transition: 'width .6s var(--ease)' }} />
-      <div style={{ flex: 1, background: 'var(--warning)' }} />
-    </div>
-  )
-}
-
-export function Spark({ data, tone = 'var(--accent)', w = 120, h = 36, fill = true }: {
-  data: number[]; tone?: string; w?: number; h?: number; fill?: boolean
-}) {
-  const max = Math.max(...data, 1), min = Math.min(...data, 0)
-  const rng = max - min || 1
-  const pts = data.map((d, i) => [(i / (data.length - 1)) * w, h - 4 - ((d - min) / rng) * (h - 8)])
-  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ')
-  const area = `${line} L${w} ${h} L0 ${h} Z`
-  return (
-    <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
-      {fill && <path d={area} fill={tone} opacity=".1" />}
-      <path d={line} fill="none" stroke={tone} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="2.4" fill={tone} />
-    </svg>
-  )
-}
-
+// Stroke-dasharray donut; segments draw clockwise from 12 o'clock.
 export function Donut({ segments, size = 120, thickness = 14, label, sub }: {
   segments: { value: number; color: string }[]; size?: number; thickness?: number; label?: string; sub?: string
 }) {
@@ -188,7 +147,6 @@ export function Donut({ segments, size = 120, thickness = 14, label, sub }: {
   )
 }
 
-// Helios switch — flat
 export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button onClick={() => onChange(!on)} aria-pressed={on} style={{
@@ -202,7 +160,7 @@ export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) =
   )
 }
 
-// Helios segmented control
+// Segmented control; tabs are bare strings or {key,label} pairs.
 export function SegTabs<T extends string>({ tabs, value, onChange, size = 'md' }: {
   tabs: ({ key: T; label: string } | T)[]; value: T; onChange: (v: T) => void; size?: 'sm' | 'md'
 }) {
@@ -223,20 +181,4 @@ export function SegTabs<T extends string>({ tabs, value, onChange, size = 'md' }
       })}
     </div>
   )
-}
-
-export function StatTile({ label, value, sub, tone, icon }: {
-  label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: string; icon?: ReactNode
-}) {
-  return (
-    <div style={{ background: 'var(--surface-faint)', border: '1px solid var(--line-faint)', borderRadius: 'var(--r-md)', padding: '13px 15px' }}>
-      <div style={{ marginBottom: 7, display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: 'var(--faint)' }}>{icon}{label}</div>
-      <div className="nn-num" style={{ fontSize: 24, color: tone || 'var(--ink)', lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 5, fontWeight: 500 }}>{sub}</div>}
-    </div>
-  )
-}
-
-export function Divider({ style }: { style?: CSSProperties }) {
-  return <div style={{ height: 1, background: 'var(--line-faint)', ...style }} />
 }

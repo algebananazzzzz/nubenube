@@ -1,15 +1,16 @@
-// prefs.ts — UI-only preferences kept in localStorage (shared across all the
-// app's windows since they share an origin). Theme, sound, and the companion
-// toggles. Changes propagate to the other window (main ↔ companion) via the
-// `storage` event so a theme flip on Settings re-themes the floating companion.
+// UI-only prefs in localStorage. The storage event syncs writes across the
+// app's windows (main ↔ companion), so a theme flip on one re-themes the other.
 
 import { create } from 'zustand'
+import { CHIME_VOICES, type ChimeVoice } from '../lib/chime'
 
 export type Theme = 'dark' | 'light'
 
 export type Prefs = {
   theme: Theme
-  sound: boolean
+  sound: boolean // master toggle for chimes
+  chimeVoice: ChimeVoice // timbre of the "Claude finished" chime
+  chimeVolume: number // 0..1
   companion: boolean
   companionMini: boolean
 }
@@ -17,8 +18,19 @@ export type Prefs = {
 const DEFAULTS: Prefs = {
   theme: 'dark',
   sound: true,
+  chimeVoice: 'bell',
+  chimeVolume: 0.6,
   companion: true,
   companionMini: false,
+}
+
+// localStorage is untyped — coerce a persisted voice back into the known set.
+function normalize(p: Prefs): Prefs {
+  return {
+    ...p,
+    chimeVoice: CHIME_VOICES.includes(p.chimeVoice) ? p.chimeVoice : DEFAULTS.chimeVoice,
+    chimeVolume: Math.max(0, Math.min(1, Number(p.chimeVolume) || DEFAULTS.chimeVolume)),
+  }
 }
 
 const KEY = 'nn_prefs_v1'
@@ -26,7 +38,7 @@ const KEY = 'nn_prefs_v1'
 function read(): Prefs {
   try {
     const raw = localStorage.getItem(KEY)
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) }
+    if (raw) return normalize({ ...DEFAULTS, ...JSON.parse(raw) })
   } catch {
     /* ignore */
   }
@@ -57,7 +69,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key !== KEY || !e.newValue) return
     try {
-      usePrefs.setState({ ...DEFAULTS, ...JSON.parse(e.newValue) })
+      usePrefs.setState(normalize({ ...DEFAULTS, ...JSON.parse(e.newValue) }))
     } catch {
       /* ignore */
     }

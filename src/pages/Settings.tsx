@@ -1,13 +1,17 @@
-// Settings — teach Nube what pulls you away, and how it should react. Rust-backed
-// Settings (distraction apps, reaction sliders, reset, Claude Code connection) +
-// UI-only prefs (theme, sound, companion, pause). Ported from settings.jsx.
+// Settings: Rust-backed config (distraction apps, sensitivity sliders, reset,
+// Claude Code connection) + localStorage prefs (theme, sound, companion).
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSettings } from '../store/settings'
 import { useUsage } from '../store/usage'
 import { usePrefs, type Theme } from '../store/prefs'
 import { api } from '../lib/api'
+import { armChimeUnlock, playChime, CHIME_VOICES, type ChimeVoice } from '../lib/chime'
 import { Card, Pill, Btn, Dot, Toggle, SegTabs } from '../components/ui'
+
+const VOICE_LABEL: Record<ChimeVoice, string> = {
+  bell: 'Bell', marimba: 'Marimba', chord: 'Chord', koto: 'Koto', blip: 'Blip',
+}
 
 const BRAND: Record<string, string> = {
   'chatgpt atlas': '#10a37f', telegram: '#2aabee', claude: '#d97757', electron: '#8a6dff',
@@ -97,8 +101,53 @@ export function Settings() {
   const rescan = useUsage((s) => s.rescan)
   const theme = usePrefs((s) => s.theme)
   const sound = usePrefs((s) => s.sound)
+  const chimeVoice = usePrefs((s) => s.chimeVoice)
+  const chimeVolume = usePrefs((s) => s.chimeVolume)
   const companion = usePrefs((s) => s.companion)
   const setPref = usePrefs((s) => s.set)
+
+  useEffect(() => { armChimeUnlock() }, [])
+
+  const notifSoundInput = useRef<HTMLInputElement>(null)
+  const [notifSoundError, setNotifSoundError] = useState<string | null>(null)
+  const [notifSoundInstalling, setNotifSoundInstalling] = useState(false)
+
+  const onNotifSoundPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+    setNotifSoundError(null)
+    setNotifSoundInstalling(true)
+    try {
+      const buf = await file.arrayBuffer()
+      const result = await api.installNotificationSound(new Uint8Array(buf), ext)
+      if (!result.live) { setNotifSoundError('Custom sounds require the desktop app.'); return }
+      await loadSettings()
+    } catch (err) {
+      setNotifSoundError(String(err))
+    } finally {
+      setNotifSoundInstalling(false)
+    }
+  }
+
+  const removeNotifSound = async () => {
+    await api.removeNotificationSound()
+    await loadSettings()
+  }
+
+  const previewNotifSound = (path: string) => {
+    // convertFileSrc not needed here — we use a regular Audio element with the
+    // asset:// protocol that Tauri sets up for local files in the webview.
+    const a = new Audio(`asset://localhost/${encodeURIComponent(path).replace(/%2F/g, '/')}`)
+    void a.play().catch(() => {
+      // If asset:// doesn't work in this context, fall back to a fetch+blob.
+      fetch(`asset://localhost/${encodeURIComponent(path).replace(/%2F/g, '/')}`)
+        .then((r) => r.blob())
+        .then((b) => { new Audio(URL.createObjectURL(b)).play() })
+        .catch(() => {})
+    })
+  }
 
   const [discovered, setDiscovered] = useState<string[]>([])
   const [scanning, setScanning] = useState(false)
@@ -139,7 +188,7 @@ export function Settings() {
 
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 14, alignItems: 'start' }}>
         {/* LEFT */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card pad={20}>
@@ -183,10 +232,60 @@ export function Settings() {
             <PrefRow title="Theme" desc="Configure your preferred theme.">
               <SegTabs<Theme> tabs={[{ key: 'dark', label: 'Dark' }, { key: 'light', label: 'Light' }]} value={theme} onChange={(v) => setPref('theme', v)} size="sm" />
             </PrefRow>
-            <PrefRow title="Sound" desc="Chimes for danger and relief."><Toggle on={sound} onChange={(v) => setPref('sound', v)} /></PrefRow>
             <PrefRow title="Desktop companion" desc="A floating widget that watches over you.">
               <Toggle on={companion} onChange={(v) => setPref('companion', v)} />
             </PrefRow>
+            <PrefRow title="Sound" desc="A chime when Claude finishes and is waiting on you; a notification when you drift.">
+              <Toggle on={sound} onChange={(v) => setPref('sound', v)} />
+            </PrefRow>
+            {sound && (
+              <PrefRow title="Chime" desc="Pick a voice for the finish chime, then preview it.">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    onClick={() => playChime(chimeVoice, chimeVolume)}
+                    title="Preview chime"
+                    style={{ width: 32, height: 32, flexShrink: 0, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.8v8.4L10 6z" /></svg>
+                  </button>
+                  <select
+                    value={chimeVoice}
+                    onChange={(e) => { const v = e.target.value as ChimeVoice; setPref('chimeVoice', v); playChime(v, chimeVolume) }}
+                    className="nn-ui"
+                    style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '7px 11px', cursor: 'pointer', colorScheme: theme }}
+                  >
+                    {CHIME_VOICES.map((v) => <option key={v} value={v}>{VOICE_LABEL[v]}</option>)}
+                  </select>
+                </div>
+              </PrefRow>
+            )}
+            {sound && (
+              <SliderRow title="Chime volume" value={Math.round(chimeVolume * 100)} min={0} max={100} step={5} onChange={(v) => setPref('chimeVolume', v / 100)} accent="var(--accent)" fmt={(v) => `${v}%`} />
+            )}
+            {sound && (
+              <PrefRow title="Notification sound" desc="Plays when you drift to a distraction app.">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {settings.notificationSoundName && settings.notificationSoundPath ? (
+                    <>
+                      <span style={{ fontSize: 12.5, color: 'var(--faint)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {settings.notificationSoundPath.split('/').pop()}
+                      </span>
+                      <button onClick={() => previewNotifSound(settings.notificationSoundPath!)} title="Preview" style={{ width: 28, height: 28, flexShrink: 0, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.8v8.4L10 6z" /></svg>
+                      </button>
+                      <button onClick={() => void removeNotifSound()} title="Remove" style={{ width: 28, height: 28, flexShrink: 0, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--faint)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, lineHeight: 1 }}>×</button>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>System default</span>
+                  )}
+                  <input ref={notifSoundInput} type="file" accept="audio/*" style={{ display: 'none' }} onChange={(e) => void onNotifSoundPicked(e)} />
+                  <Btn variant="line" size="sm" onClick={() => notifSoundInput.current?.click()} disabled={notifSoundInstalling}>
+                    {notifSoundInstalling ? 'Installing…' : 'Browse…'}
+                  </Btn>
+                </div>
+                {notifSoundError && <div style={{ fontSize: 12, color: 'var(--critical)', marginTop: 6 }}>{notifSoundError}</div>}
+              </PrefRow>
+            )}
             <PrefRow title="Daily reset" desc="Life resets to 100% at this time." last>
               <input type="time" value={settings.resetTimeLocal} onChange={(e) => void save({ resetTimeLocal: e.target.value })} className="nn-num" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '7px 11px', colorScheme: theme }} />
             </PrefRow>

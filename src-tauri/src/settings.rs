@@ -68,6 +68,8 @@ pub struct Settings {
     pub drift_moment_intensity: String,
     pub water_rates: WaterRates,
     pub log_roots: Vec<String>,
+    pub notification_sound_name: Option<String>,
+    pub notification_sound_path: Option<String>,
 }
 
 impl Default for Settings {
@@ -94,6 +96,8 @@ impl Default for Settings {
                 .iter()
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect(),
+            notification_sound_name: None,
+            notification_sound_path: None,
         }
     }
 }

@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
 
 use crate::settings::Settings;
@@ -218,6 +219,71 @@ pub fn nube_set_paused(state: State<AppState>, paused: bool) {
 #[tauri::command]
 pub fn get_known_apps(state: State<AppState>) -> Vec<KnownApp> {
     db::open(&state.db_path).map(|c| db::get_known_apps(&c)).unwrap_or_default()
+}
+
+// ── notification sound ────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct NotificationSoundResult {
+    pub name: String,
+    pub path: String,
+}
+
+const ALLOWED_SOUND_EXTS: &[&str] = &["wav", "mp3", "aiff", "ogg", "flac", "m4a"];
+
+#[tauri::command]
+pub fn install_notification_sound(
+    state: State<AppState>,
+    data: Vec<u8>,
+    ext: String,
+) -> Result<NotificationSoundResult, String> {
+    let ext = ext.to_lowercase();
+    if !ALLOWED_SOUND_EXTS.contains(&ext.as_str()) {
+        return Err(format!("Unsupported audio format: {ext}"));
+    }
+    let sounds_dir = state.config_dir.join("sounds");
+    std::fs::create_dir_all(&sounds_dir)
+        .map_err(|e| format!("Could not create sounds dir: {e}"))?;
+    let filename = format!("nn_alert.{ext}");
+    let dest = sounds_dir.join(&filename);
+    std::fs::write(&dest, &data)
+        .map_err(|e| format!("Could not write sound file: {e}"))?;
+    // macOS: also copy to ~/Library/Sounds so the OS notification can find it by name.
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let lib_sounds = home.join("Library/Sounds");
+            let _ = std::fs::create_dir_all(&lib_sounds);
+            let _ = std::fs::copy(&dest, lib_sounds.join(&filename));
+        }
+    }
+    let path_str = dest.to_string_lossy().into_owned();
+    let mut s = crate::settings::load(&state.config_dir);
+    s.notification_sound_name = Some("nn_alert".to_string());
+    s.notification_sound_path = Some(path_str.clone());
+    crate::settings::save(&state.config_dir, &s);
+    Ok(NotificationSoundResult { name: "nn_alert".to_string(), path: path_str })
+}
+
+#[tauri::command]
+pub fn remove_notification_sound(state: State<AppState>) -> Result<(), String> {
+    let mut s = crate::settings::load(&state.config_dir);
+    if let Some(ref path) = s.notification_sound_path.clone() {
+        let p = std::path::Path::new(path);
+        if p.exists() {
+            let _ = std::fs::remove_file(p);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(filename) = p.file_name() {
+            if let Some(home) = dirs::home_dir() {
+                let _ = std::fs::remove_file(home.join("Library/Sounds").join(filename));
+            }
+        }
+    }
+    s.notification_sound_name = None;
+    s.notification_sound_path = None;
+    crate::settings::save(&state.config_dir, &s);
+    Ok(())
 }
 
 /// Best-effort list of currently-running GUI apps (to pre-populate the picker).
