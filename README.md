@@ -46,9 +46,13 @@ Download the build for your platform from the
 | **Linux (Ubuntu/Debian)** | `.deb` | Install with your package manager |
 | **Linux (universal)** | `.AppImage` | `chmod +x`, then run |
 
-**macOS first launch:** the `.dmg` is unsigned for now, so macOS will hesitate.
-Right-click NubeNube → **Open** → **Open**. You only do this once; updates after that
-install silently.
+**macOS first launch:** the `.dmg` is unsigned for now, so run once after installing:
+
+```bash
+xattr -cr /Applications/NubeNube.app
+```
+
+Updates after that install silently.
 
 ---
 
