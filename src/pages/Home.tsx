@@ -1,5 +1,5 @@
-// Home — a single calm cockpit: the creature, live status, life, and the one
-// action that matters right now. Ported from home.jsx, wired to the live tick.
+// Home: live cockpit (creature + status + life + pause/insights actions), the
+// "today" timers, and the first-run empty state. Reads the useNube view-model.
 
 import { useNavigate } from 'react-router-dom'
 import { useUsage } from '../store/usage'
@@ -8,7 +8,7 @@ import { useNube, statusFor, cueFor, timerFor, type NubeState } from '../lib/der
 import { Card, Pill, Btn, Dot, LifeBar, Eyebrow } from '../components/ui'
 import { Sky, Nube } from '../components/NubeCreature'
 
-// ── live drift countdown — the urgency driver ──────────────────
+// drift countdown — net-rate seconds-to-faint with progress bar
 function Countdown({ s, compact }: { s: NubeState; compact?: boolean }) {
   if (s.remaining == null) return null
   const crit = s.life < 30
@@ -41,7 +41,6 @@ function PauseButton({ s, size = 'md', full }: { s: NubeState; size?: 'sm' | 'md
   )
 }
 
-// ── the unified live cockpit ────────────────────────────────────
 function HeroCockpit() {
   const s = useNube()
   const navigate = useNavigate()
@@ -57,7 +56,7 @@ function HeroCockpit() {
 
   return (
     <Card pad={0} style={{ overflow: 'hidden', display: 'flex', minHeight: 312 }}>
-      {/* left — the creature in its calm panel */}
+      {/* left — creature panel */}
       <div style={{ position: 'relative', width: '40%', minWidth: 260, flexShrink: 0, borderRight: '1px solid var(--line-faint)' }}>
         <Sky sky={s.sky} style={{ position: 'absolute', inset: 0 }}>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -73,7 +72,6 @@ function HeroCockpit() {
 
       {/* right — facts + action */}
       <div style={{ flex: 1, minWidth: 0, padding: '22px 24px', display: 'flex', flexDirection: 'column' }}>
-        {/* one status line: tone dot + the state word (no duplicate chip) + caption */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Dot tone={st.tone} pulse={st.pulse} size={9} />
           <span className="nn-disp" style={{ fontSize: 21, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cue.title}</span>
@@ -107,7 +105,6 @@ function HeroCockpit() {
   )
 }
 
-// ── "today" live timers ─────────────────────────────────────────
 function TimerTile({ label, value, tone, badge, fmt }: { label: string; value: number; tone: string; badge?: string | null; fmt: (s: number) => string }) {
   return (
     <div style={{ flex: 1, minWidth: 0, padding: '13px 14px', borderRadius: 'var(--r-md)', background: 'var(--surface-faint)', border: '1px solid var(--line-faint)' }}>
@@ -129,13 +126,13 @@ function TodayStrip() {
       <div style={{ display: 'flex', gap: 10, marginTop: 13 }}>
         <TimerTile label="Claude working" value={s.work} tone="var(--success)" badge={s.run > 1 ? `×${s.run}` : null} fmt={s.fmtCountdown} />
         <TimerTile label="Distracted" value={s.distracted} tone="var(--warning)" fmt={s.fmtCountdown} />
-        <TimerTile label="Monitored" value={s.monitored} tone="var(--faint)" fmt={s.fmtCountdown} />
+        <TimerTile label="Focused" value={s.focused} tone="var(--accent)" fmt={s.fmtCountdown} />
       </div>
     </Card>
   )
 }
 
-// ── empty / first-run Home ──────────────────────────────────────
+// first-run state shown until a project or connection exists
 function HomeEmpty() {
   const s = useNube()
   const loadAll = useUsage((st) => st.loadAll)

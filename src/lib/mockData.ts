@@ -103,6 +103,8 @@ export const mockSettings: Settings = {
   driftMomentIntensity: 'gentle-notification',
   waterRates: { read: 0.0002, write: 0.0015 },
   logRoots: [],
+  notificationSoundName: null,
+  notificationSoundPath: null,
 }
 
 // auto-discovered apps surfaced by the Settings "scan" (browser/dev fallback)

@@ -147,6 +147,8 @@ pub fn run() {
             commands::nube_set_paused,
             commands::get_known_apps,
             commands::list_running_apps,
+            commands::install_notification_sound,
+            commands::remove_notification_sound,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Nube Nube")

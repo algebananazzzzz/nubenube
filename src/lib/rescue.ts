@@ -1,5 +1,5 @@
-// rescue.ts — thin frontend wrappers over the Rust window-control commands that
-// drive the real OS companion window. All no-ops outside Tauri.
+// Wrappers over the Rust window-control commands for the companion window.
+// All no-ops outside Tauri.
 
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from './api'

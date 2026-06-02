@@ -1,16 +1,14 @@
-// Companion — the always-on-top desktop indicator (its own transparent window).
-// Helios card (full) + slim pill (mini). The header is a Tauri drag region; the
-// macOS overlay also makes the whole background draggable.
-//
-// Responsive sizing: the card/pill is sized to its CONTENT (no fixed window
-// height, no flex fillers), and a ResizeObserver reports the measured size to
-// Rust (`nube_resize_companion`) so the OS window tracks the content exactly —
-// it never clips the full card and never leaves dead space or trailing
-// whitespace on the pill.
+// Always-on-top companion window (transparent). Renders a full card or a mini
+// pill, both content-sized; a ResizeObserver reports the measured size to Rust
+// (nube_resize_companion) so the OS window tracks the content exactly.
 
 import { useEffect, useRef, type ReactNode, type Ref } from 'react'
+import { listen } from '@tauri-apps/api/event'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { useFocus } from '../store/focus'
 import { usePrefs } from '../store/prefs'
+import { armChimeUnlock, playChime } from '../lib/chime'
+import { isTauri } from '../lib/api'
 import { rescue } from '../lib/rescue'
 import { useNube, statusFor, type NubeState } from '../lib/derive'
 import { themeVars } from '../lib/clay'
@@ -39,7 +37,7 @@ function MiniStat({ tone, value, label }: { tone: string; value: ReactNode; labe
   )
 }
 
-// drifting urgency block — counts down to faint at the honest net rate.
+// drift countdown — net-rate seconds-to-faint with progress bar
 function CompactCountdown({ s }: { s: NubeState }) {
   if (s.remaining == null) return null
   const crit = s.life < 30
@@ -69,6 +67,7 @@ function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: 
       width: CARD_W, borderRadius: 'var(--r-lg)', overflow: 'hidden',
       background: 'var(--surface)', boxShadow: 'var(--shadow-lg)',
       border: '1px solid var(--line)', userSelect: 'none',
+      animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
     }}>
       {/* draggable creature header */}
       <div data-tauri-drag-region style={{ position: 'relative', cursor: 'grab', height: 92, borderBottom: '1px solid var(--line-faint)' }}>
@@ -119,6 +118,7 @@ function CompanionMini({ s, onExpand, innerRef }: { s: NubeState; onExpand: () =
       display: 'inline-flex', alignItems: 'center', gap: 9, height: 44, padding: '0 14px 0 6px',
       borderRadius: 'var(--r-pill)', background: 'var(--surface)', boxShadow: 'var(--shadow-lg)',
       border: '1px solid var(--line)', cursor: 'grab', userSelect: 'none', whiteSpace: 'nowrap',
+      animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
     }} className="nn-ui">
       <button onClick={onExpand} title="expand" style={{ width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', flexShrink: 0, border: '1px solid var(--line-faint)', background: 'var(--surface-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer' }}>
         <Nube mood={s.mood} size={32} />
@@ -140,16 +140,44 @@ function CompanionMini({ s, onExpand, innerRef }: { s: NubeState; onExpand: () =
 
 export function Companion() {
   const subscribe = useFocus((st) => st.subscribe)
+  const tick = useFocus((st) => st.tick)
   const mini = usePrefs((st) => st.companionMini)
   const setPref = usePrefs((st) => st.set)
+  const sound = usePrefs((st) => st.sound)
+  const chimeVoice = usePrefs((st) => st.chimeVoice)
+  const chimeVolume = usePrefs((st) => st.chimeVolume)
   const s = useNube()
   const cardRef = useRef<HTMLDivElement>(null)
+  const prevWaiting = useRef(tick.waitingSessions)
 
   useEffect(() => {
     document.documentElement.classList.add('nn-transparent')
+    armChimeUnlock()
     void subscribe()
     return () => document.documentElement.classList.remove('nn-transparent')
   }, [subscribe])
+
+  // Windows/Linux: play the custom notification sound when a drift alert fires.
+  // macOS handles this via the OS notification sound mechanism instead.
+  useEffect(() => {
+    if (!isTauri) return
+    const unlisten = listen<string>('play-notification-sound', ({ payload: path }) => {
+      const a = new Audio(convertFileSrc(path))
+      void a.play()
+    })
+    return () => { void unlisten.then((fn) => fn()) }
+  }, [])
+
+  // The Companion is the single audio owner (so the chime never doubles across
+  // windows): when a session newly enters the waiting phase — Claude finished a
+  // turn and is now waiting on you — ring the chime. Keyed off waitingSessions
+  // (which counts regardless of foreground app), so it fires even if you've
+  // already wandered off. Suppressed while paused.
+  useEffect(() => {
+    const rose = tick.waitingSessions > prevWaiting.current
+    prevWaiting.current = tick.waitingSessions
+    if (rose && sound && tick.state !== 'paused') playChime(chimeVoice, chimeVolume)
+  }, [tick.waitingSessions, tick.state, sound, chimeVoice, chimeVolume])
 
   useEffect(() => { document.documentElement.setAttribute('data-theme', s.theme) }, [s.theme])
 
@@ -177,7 +205,7 @@ export function Companion() {
   return (
     // fit-content + padding → the wrapper hugs the card and leaves room for the
     // soft shadow; the window is then sized to (card + padding) by the effect.
-    <div className="nn-app" data-theme={s.theme} style={{ ...themeVars(s.hue, s.theme, s.clay), width: 'fit-content', padding: PAD, background: 'transparent', filter: s.paused ? 'saturate(.7)' : 'none' }}>
+    <div className="nn-app" data-theme={s.theme} style={{ ...themeVars(s.theme, s.clay), width: 'fit-content', padding: PAD, background: 'transparent', filter: s.paused ? 'saturate(.7)' : 'none' }}>
       {mini
         ? <CompanionMini s={s} innerRef={cardRef} onExpand={() => setPref('companionMini', false)} />
         : <CompanionCard s={s} innerRef={cardRef} onMinimize={() => setPref('companionMini', true)} />}

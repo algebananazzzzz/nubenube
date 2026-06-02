@@ -1,6 +1,5 @@
-// AppShell — the main window chrome: custom titlebar (native macOS traffic
-// lights overlay on the left), Helios sidebar nav + the live "Nube now" status
-// chip, and the page header. Injects the theme + per-project accent/clay vars.
+// Main-window chrome: drag titlebar, sidebar nav + live status chip, page
+// header. Injects theme + accent/clay CSS vars on the root and renders <Outlet>.
 
 import { useEffect, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
@@ -50,7 +49,7 @@ function NavItem({ item }: { item: NavDef }) {
   )
 }
 
-// sidebar status chip — life, status (or live countdown), click → Home
+// sidebar status chip: life % + state label or drift countdown; links Home
 function HomeBloop() {
   const s = useNube()
   const st = statusFor(s.effState, s.appName)
@@ -100,8 +99,8 @@ export function AppShell() {
   const head = HEADERS[seg]
 
   return (
-    <div className="nn-app" data-theme={s.theme} style={{ ...themeVars(s.hue, s.theme, s.clay), position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--page)' }}>
-      {/* title bar — native traffic lights sit in the left inset (Overlay style) */}
+    <div className="nn-app" data-theme={s.theme} style={{ ...themeVars(s.theme, s.clay), position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--page)' }}>
+      {/* titlebar — native traffic lights overlay the left inset */}
       <div data-tauri-drag-region style={{ position: 'relative', height: 40, flexShrink: 0, borderBottom: '1px solid var(--line-faint)', background: 'var(--surface-faint)' }}>
         <span className="nn-disp" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--text)', fontWeight: 600, pointerEvents: 'none' }}>NubeNube</span>
       </div>

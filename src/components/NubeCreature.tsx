@@ -1,12 +1,10 @@
-// NubeCreature.tsx — Nube, a flat, calm cloud-blob companion. Solid fills tinted
-// by the project hue (via injected --clay-* vars), a simple expressive face, two
-// little feet. Sits on a softly tinted panel ("sky") that reflects status. No
-// glow, gradients, or particles. Ported from nube.jsx.
+// Nube creature: flat CSS/SVG blob tinted by --clay-* vars. Face, body, and the
+// status-tinted "sky" panel are pure functions of mood/sky props.
 
 import type { CSSProperties, ReactNode } from 'react'
 import type { Mood, Sky as SkyKind } from '../lib/derive'
 
-// ── the calm status panel behind the creature ──────────────────
+// sky → status tint behind the creature
 function skyTint(sky: SkyKind): string {
   switch (sky) {
     case 'good':
@@ -32,7 +30,6 @@ export function Sky({ sky, children, style }: { sky: SkyKind; children?: ReactNo
   )
 }
 
-// ── eyes + cheeks + mouth per mood ──────────────────────────────
 const EYE = '#26282e'
 
 function Face({ mood, B }: { mood: Mood; B: number }) {
@@ -76,7 +73,6 @@ function Face({ mood, B }: { mood: Mood; B: number }) {
   )
 }
 
-// ── the flat blob body ──────────────────────────────────────────
 export function Nube({ mood, size = 200 }: { mood: Mood; size?: number }) {
   const s = size
   const B = s * 0.84
@@ -89,35 +85,20 @@ export function Nube({ mood, size = 200 }: { mood: Mood; size?: number }) {
 
   return (
     <div style={{ position: 'relative', width: s, height: s * 1.04, transform: sink, transition: 'transform .7s var(--ease-soft)' }}>
-      {/* soft ground shadow — flat, low opacity */}
       <div style={{ position: 'absolute', left: '50%', bottom: s * 0.02, width: s * 0.5, height: s * 0.06, transform: 'translateX(-50%)', borderRadius: '50%', background: 'rgba(0,0,0,.10)', filter: 'blur(4px)' }} />
 
       <div style={{ position: 'absolute', inset: 0, animation: float, opacity: bodyOpacity, transition: 'opacity .7s' }}>
-        {/* feet */}
         <div style={{ ...foot, left: s * 0.3, transform: 'rotate(-10deg)' }} />
         <div style={{ ...foot, right: s * 0.3, transform: 'rotate(10deg)' }} />
 
-        {/* body — flat fill, hairline darker ring, simple light belly */}
         <div style={{
           position: 'absolute', left: (s - B) / 2, top: s * 0.1, width: B, height: B, borderRadius: '50%',
           background: 'var(--clay-mid)', boxShadow: 'inset 0 0 0 1px var(--clay-deep)',
         }}>
-          {/* light top cap — flat lighter tone for a touch of form */}
           <div style={{ position: 'absolute', top: B * 0.08, left: B * 0.14, width: B * 0.5, height: B * 0.34, borderRadius: '50%', background: 'var(--clay-light)', opacity: low ? 0.4 : 0.7 }} />
           <Face mood={mood} B={B} />
         </div>
       </div>
     </div>
-  )
-}
-
-// Convenience: a creature centered on its tinted sky panel.
-export function Biome({ mood, sky, creature = 200, style }: { mood: Mood; sky: SkyKind; creature?: number; style?: CSSProperties }) {
-  return (
-    <Sky sky={sky} style={style}>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Nube mood={mood} size={creature} />
-      </div>
-    </Sky>
   )
 }
