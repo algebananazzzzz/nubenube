@@ -46,9 +46,14 @@ Download the build for your platform from the
 | **Linux (Ubuntu/Debian)** | `.deb` | Install with your package manager |
 | **Linux (universal)** | `.AppImage` | `chmod +x`, then run |
 
-**macOS first launch:** the `.dmg` is unsigned for now, so macOS will hesitate.
-Right-click NubeNube → **Open** → **Open**. You only do this once; updates after that
-install silently.
+**macOS first launch:** the `.dmg` is unsigned, so macOS will quarantine the app.
+After dragging to Applications, open Terminal and run:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Nube Nube.app"
+```
+
+Then launch it normally. You only need to do this once.
 
 ---
 
