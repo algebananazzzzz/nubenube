@@ -4,8 +4,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSettings } from '../store/settings'
 import { useUsage } from '../store/usage'
-import { usePrefs, type Theme } from '../store/prefs'
+import { usePrefs, type Theme, type UpdateChannel } from '../store/prefs'
 import { api } from '../lib/api'
+import { checkForUpdates } from '../lib/updater'
 import { armChimeUnlock, playChime, CHIME_VOICES, type ChimeVoice } from '../lib/chime'
 import { Card, Pill, Btn, Dot, Toggle, SegTabs } from '../components/ui'
 
@@ -104,7 +105,13 @@ export function Settings() {
   const chimeVoice = usePrefs((s) => s.chimeVoice)
   const chimeVolume = usePrefs((s) => s.chimeVolume)
   const companion = usePrefs((s) => s.companion)
+  const updateChannel = usePrefs((s) => s.updateChannel)
   const setPref = usePrefs((s) => s.set)
+  const [checking, setChecking] = useState(false)
+  const onCheckUpdates = async () => {
+    setChecking(true)
+    try { await checkForUpdates({ manual: true }) } finally { setChecking(false) }
+  }
 
   useEffect(() => { armChimeUnlock() }, [])
 
@@ -286,8 +293,14 @@ export function Settings() {
                 {notifSoundError && <div style={{ fontSize: 12, color: 'var(--critical)', marginTop: 6 }}>{notifSoundError}</div>}
               </PrefRow>
             )}
-            <PrefRow title="Daily reset" desc="Life resets to 100% at this time." last>
+            <PrefRow title="Daily reset" desc="Life resets to 100% at this time.">
               <input type="time" value={settings.resetTimeLocal} onChange={(e) => void save({ resetTimeLocal: e.target.value })} className="nn-num" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '7px 11px', colorScheme: theme }} />
+            </PrefRow>
+            <PrefRow title="Updates" desc="Stable is the safe track; Beta gets new builds first." last>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <SegTabs<UpdateChannel> tabs={[{ key: 'stable', label: 'Stable' }, { key: 'beta', label: 'Beta' }]} value={updateChannel} onChange={(v) => setPref('updateChannel', v)} size="sm" />
+                <Btn variant="line" size="sm" onClick={() => void onCheckUpdates()} disabled={checking}>{checking ? 'Checking…' : 'Check'}</Btn>
+              </div>
             </PrefRow>
           </Card>
         </div>
