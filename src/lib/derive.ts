@@ -5,7 +5,7 @@ import { useFocus } from '../store/focus'
 import { usePrefs, type Theme } from '../store/prefs'
 import { useCountdown, useCountUp } from './useCountdown'
 import { rescue } from './rescue'
-import { hueClay, moodDrain, DEFAULT_HUE, type Clay } from './clay'
+import { hueClay, moodDrain, sessionTier, type Clay } from './clay'
 import type { FocusState, FocusTick } from '../types'
 
 export const BASELINE = 100
@@ -115,6 +115,7 @@ export type NubeState = {
   mood: Mood
   sky: Sky
   clay: Clay
+  glow: boolean // session tier 4+ — creature gets an aura
   secondsToDeath: number | null
   remaining: number | null
   countdownPct: number
@@ -136,7 +137,9 @@ export function useNube(): NubeState {
   const run = tick.runningSessions ?? 0
   const wait = tick.waitingSessions ?? 0
   const distract = tick.distractSecsToday ?? 0
-  const hue = tick.colorHue || DEFAULT_HUE
+  // Creature color is driven by concurrent sessions (running + waiting), not the
+  // project hue — more sessions warm + saturate the clay to reward fanning out.
+  const tier = sessionTier(run + wait)
 
   // Health and the countdown are one quantity, viewed two ways. The backend sets
   // secondsToDeath = life/|rate|, so life is linear in time-left and hits 0 exactly
@@ -156,7 +159,7 @@ export function useNube(): NubeState {
   const fainting = remaining != null && remaining <= 0
 
   const { satMul, ltAdd } = moodDrain(life)
-  const clay = hueClay(hue, satMul, ltAdd)
+  const clay = hueClay(tier.hue, satMul * tier.satScale, ltAdd)
   const mood: Mood = paused
     ? (life >= 100 ? 'content' : life >= 55 ? 'worried' : 'fading')
     : deriveMood(life, cap)
@@ -177,7 +180,7 @@ export function useNube(): NubeState {
     tick, theme, life, baseline, cap, effState, appName,
     run, wait, work, distracted, focused,
     paused, togglePause: () => { void rescue.setPaused(!paused) },
-    mood, sky, clay,
+    mood, sky, clay, glow: tier.glow,
     secondsToDeath, remaining, countdownPct, fainting,
     fmtClock, fmtCountdown,
   }

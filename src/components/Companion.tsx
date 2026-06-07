@@ -73,7 +73,7 @@ function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: 
       <div data-tauri-drag-region style={{ position: 'relative', cursor: 'grab', height: 92, borderBottom: '1px solid var(--line-faint)' }}>
         <Sky sky={s.sky} style={{ position: 'absolute', inset: 0 }}>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-            <Nube mood={s.mood} size={74} />
+            <Nube mood={s.mood} size={74} glow={s.glow} />
           </div>
         </Sky>
         <div style={{ position: 'absolute', top: 7, left: 0, right: 0, display: 'flex', justifyContent: 'center', color: 'var(--faint)', pointerEvents: 'none' }}><Grip /></div>
@@ -121,7 +121,7 @@ function CompanionMini({ s, onExpand, innerRef }: { s: NubeState; onExpand: () =
       animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
     }} className="nn-ui">
       <button onClick={onExpand} title="expand" style={{ width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', flexShrink: 0, border: '1px solid var(--line-faint)', background: 'var(--surface-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer' }}>
-        <Nube mood={s.mood} size={32} />
+        <Nube mood={s.mood} size={32} glow={s.glow} />
       </button>
       <span style={{ display: 'inline-flex', flexShrink: 0 }}><Dot tone={st.tone} pulse={st.pulse} size={8} /></span>
       <span className="nn-num" style={{ fontSize: 14, fontWeight: 700, color: lifeTone, flexShrink: 0 }}>{Math.round(s.life)}%</span>

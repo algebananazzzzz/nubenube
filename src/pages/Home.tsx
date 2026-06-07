@@ -60,7 +60,7 @@ function HeroCockpit() {
       <div style={{ position: 'relative', width: '40%', minWidth: 260, flexShrink: 0, borderRight: '1px solid var(--line-faint)' }}>
         <Sky sky={s.sky} style={{ position: 'absolute', inset: 0 }}>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Nube mood={s.mood} size={172} />
+            <Nube mood={s.mood} size={172} glow={s.glow} />
           </div>
         </Sky>
         {s.paused && (

@@ -62,7 +62,7 @@ function HomeBloop() {
         borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface)', textAlign: 'left',
       }}>
         <div style={{ width: 38, height: 38, borderRadius: 'var(--r-sm)', overflow: 'hidden', flexShrink: 0, border: '1px solid var(--line-faint)', background: 'var(--surface-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Nube mood={s.mood} size={36} />
+          <Nube mood={s.mood} size={36} glow={s.glow} />
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>

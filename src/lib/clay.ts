@@ -30,6 +30,19 @@ export function hueClay(h: number, satMul = 1, ltAdd = 0): Clay {
   }
 }
 
+// Concurrent-session tier → creature hue. Color rewards more sessions: dull grey
+// at rest, then cool→warm and more saturated as the fleet grows, topping out at
+// gold + an aura glow at 4+. Warm caps at gold, never red (red = critical here).
+export type SessionTier = { hue: number; satScale: number; glow: boolean; name: string }
+
+export function sessionTier(total: number): SessionTier {
+  if (total <= 0) return { hue: 240, satScale: 0.18, glow: false, name: 'dormant' }
+  if (total === 1) return { hue: 243, satScale: 1.0, glow: false, name: 'spark' }
+  if (total === 2) return { hue: 190, satScale: 1.06, glow: false, name: 'flow' }
+  if (total === 3) return { hue: 150, satScale: 1.0, glow: false, name: 'surge' }
+  return { hue: 40, satScale: 1.2, glow: true, name: 'blaze' } // 4+
+}
+
 // desaturate + lighten as life falls below baseline
 export function moodDrain(life: number): { satMul: number; ltAdd: number } {
   if (life >= 100) return { satMul: 1, ltAdd: 0 }
