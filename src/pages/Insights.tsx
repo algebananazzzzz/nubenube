@@ -1,7 +1,7 @@
 // Insights: range-scoped water + token composition, focus split, distraction
 // breakdown, and the all-time projects list. Backed by get_insights/get_projects.
 
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useUsage } from '../store/usage'
 import { usePrefs } from '../store/prefs'
@@ -63,70 +63,78 @@ function WaterHero({ range, tokens }: { range: RangeKey; tokens: TokenBreakdown 
 // concurrency reward color: more sessions → warmer/brighter (mirrors the
 // creature's session tiers in lib/clay).
 function tierColor(n: number, dark: boolean): string {
-  return n <= 0 ? hueSwatch(240, dark) : hueSwatch(sessionTier(n).hue, dark)
+  const t = Math.round(n) // tiers are integer session counts; round the avg
+  return t <= 0 ? hueSwatch(240, dark) : hueSwatch(sessionTier(t).hue, dark)
 }
 
-// SVG area time-graph of peak concurrency across the chosen period. viewBox is
-// fixed and the svg scales to its container width (height:auto) so strokes stay
-// undistorted. x = time buckets (hourly today / daily otherwise), y = peak.
-function SessionGraph({ series, dark, peak, avg }: { series: SessionPoint[]; dark: boolean; peak: number; avg: number }) {
-  const gid = useId()
+// SVG bar time-graph of concurrency. viewBox is fixed; the svg scales to its
+// container width (height:auto). Today = a 96-cell 15-min grid across the full
+// day: colored bars where sessions ran, dashed nubs where the app was off, and a
+// faint track for the not-yet-happened rest of the day. Longer ranges = 1 bar/day.
+function SessionGraph({ series, dark, avg }: { series: SessionPoint[]; dark: boolean; avg: number }) {
   const W = 600, H = 150, padL = 10, padR = 10, padT = 12, padB = 22
   const innerW = W - padL - padR, innerH = H - padT - padB, baseY = padT + innerH
   const n = series.length
-  const maxPeak = Math.max(peak, 1)
-  const x = (i: number) => (n > 1 ? padL + (i / (n - 1)) * innerW : padL + innerW / 2)
-  const y = (v: number) => padT + (1 - Math.min(1, v / maxPeak)) * innerH
-  const stroke = tierColor(peak, dark)
-
-  const pts = series.map((p, i) => `${x(i).toFixed(1)},${y(p.peak).toFixed(1)}`)
-  const line = `M${pts.join(' L')}`
-  const area = `M${x(0).toFixed(1)},${baseY} L${pts.join(' L')} L${x(n - 1).toFixed(1)},${baseY} Z`
+  // Bars show each bucket's engaged-weighted avg concurrency; scale the y-axis to
+  // the tallest bar so the chart uses its full height.
+  const maxBar = Math.max(0.001, ...series.map((p) => p.avg))
+  const cellW = innerW / n
+  const gap = Math.min(cellW * 0.3, 3)
+  const barW = Math.max(1, cellW - gap)
+  const left = (i: number) => padL + i * cellW + gap / 2
+  const yOf = (v: number) => baseY - Math.min(1, v / maxBar) * innerH
+  const stroke = tierColor(maxBar, dark)
+  const avgY = yOf(avg)
+  const firstFuture = series.findIndex((p) => p.future)
 
   // ~6 evenly spaced x labels (first … last)
   const ticks = Math.min(n, 6)
-  const tickIdx = Array.from({ length: ticks }, (_, k) => Math.round((k * (n - 1)) / Math.max(1, ticks - 1)))
-  const uniqTicks = [...new Set(tickIdx)]
+  const tickIdx = [...new Set(Array.from({ length: ticks }, (_, k) => Math.round((k * (n - 1)) / Math.max(1, ticks - 1))))]
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', marginTop: 14, overflow: 'visible' }}>
-      <defs>
-        <linearGradient id={`grad-${gid}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={stroke} stopOpacity={0.34} />
-          <stop offset="100%" stopColor={stroke} stopOpacity={0.02} />
-        </linearGradient>
-      </defs>
+      {/* faint "rest of today" track + a divider at now */}
+      {firstFuture >= 0 && (
+        <>
+          <rect x={left(firstFuture) - gap / 2} y={padT} width={W - padR - (left(firstFuture) - gap / 2)} height={innerH} fill="var(--surface-strong)" opacity={0.35} />
+          <line x1={left(firstFuture) - gap / 2} y1={padT} x2={left(firstFuture) - gap / 2} y2={baseY} stroke="var(--faint)" strokeWidth={1} strokeDasharray="2 2" opacity={0.6} />
+        </>
+      )}
 
       {/* top + base gridlines */}
       <line x1={padL} y1={padT} x2={W - padR} y2={padT} stroke="var(--line-faint)" strokeWidth={1} />
       <line x1={padL} y1={baseY} x2={W - padR} y2={baseY} stroke="var(--line)" strokeWidth={1} />
-      <text x={padL} y={padT - 3} fontSize={10} fill="var(--faint)" className="nn-num">{maxPeak}</text>
+      <text x={padL} y={padT - 3} fontSize={10} fill="var(--faint)" className="nn-num">{maxBar.toFixed(1)}</text>
 
       {/* avg reference line */}
       {avg > 0 && (
         <>
-          <line x1={padL} y1={y(avg)} x2={W - padR} y2={y(avg)} stroke="var(--faint)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
-          <text x={W - padR} y={y(avg) - 3} fontSize={9.5} fill="var(--faint)" textAnchor="end">avg {avg.toFixed(1)}</text>
+          <line x1={padL} y1={avgY} x2={W - padR} y2={avgY} stroke="var(--faint)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
+          <text x={W - padR} y={avgY - 3} fontSize={9.5} fill="var(--faint)" textAnchor="end">avg {avg.toFixed(1)}</text>
         </>
       )}
 
-      <path d={area} fill={`url(#grad-${gid})`} />
-      <path d={line} fill="none" stroke={stroke} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+      {/* bars (avg concurrency) · dashed nubs (app off) · nothing for future/idle */}
+      {series.map((p, i) => {
+        if (p.future) return null
+        if (!p.present) {
+          return <line key={i} x1={left(i)} y1={baseY} x2={left(i) + barW} y2={baseY} stroke="var(--faint)" strokeWidth={2} strokeDasharray="2 3" opacity={0.4} />
+        }
+        if (p.avg <= 0) return null // app on but idle → baseline only
+        return <rect key={i} x={left(i)} y={yOf(p.avg)} width={barW} height={baseY - yOf(p.avg)} rx={Math.min(2, barW / 2)} fill={stroke} opacity={0.9} />
+      })}
 
       {/* x labels */}
-      {uniqTicks.map((i) => (
-        <text key={i} x={x(i)} y={H - 6} fontSize={9.5} fill="var(--faint)" textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} className="nn-num">{series[i].label}</text>
+      {tickIdx.map((i) => (
+        <text key={`l${i}`} x={left(i) + barW / 2} y={H - 6} fontSize={9.5} fill="var(--faint)" textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} className="nn-num">{series[i].label}</text>
       ))}
 
       {/* per-bucket hover targets */}
-      {series.map((p, i) => {
-        const w = n > 1 ? innerW / (n - 1) : innerW
-        return (
-          <rect key={i} x={x(i) - w / 2} y={padT} width={w} height={innerH} fill="transparent">
-            <title>{`${p.label} · peak ${p.peak}, avg ${p.avg.toFixed(1)}`}</title>
-          </rect>
-        )
-      })}
+      {series.map((p, i) => (
+        <rect key={`h${i}`} x={padL + i * cellW} y={padT} width={cellW} height={innerH} fill="transparent">
+          <title>{p.future ? `${p.label} · upcoming` : p.present ? `${p.label} · peak ${p.peak}, avg ${p.avg.toFixed(1)}` : `${p.label} · no data`}</title>
+        </rect>
+      ))}
     </svg>
   )
 }
@@ -134,17 +142,18 @@ function SessionGraph({ series, dark, peak, avg }: { series: SessionPoint[]; dar
 function SessionsCard({ insights, range, dark }: { insights: InsightsData; range: RangeKey; dark: boolean }) {
   const rl = RANGE_LABEL[range]
   const series = insights.sessionSeries ?? []
-  const peak = insights.peakSessions ?? 0
+  // "peak" = the tallest bar = the highest bucket average (peak of the averages).
+  const peakAvg = series.reduce((m, p) => Math.max(m, p.avg), 0)
   const avg = insights.avgSessions ?? 0
   return (
     <Card pad={22}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <Eyebrow style={{ fontSize: 12, marginBottom: 6 }}>Concurrent sessions · {rl}</Eyebrow>
-        <span style={{ fontSize: 11.5, color: 'var(--faint)', fontWeight: 500 }}>running + waiting · {range === 'today' ? 'hourly' : 'daily'}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--faint)', fontWeight: 500 }}>{range === 'today' ? '15-min' : range === 'week' ? '2-hour' : 'daily'}</span>
       </div>
       <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', marginTop: 8 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: tierColor(peak, dark), lineHeight: 0.9 }}>{peak}</span>
+          <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: tierColor(peakAvg, dark), lineHeight: 0.9 }}>{peakAvg.toFixed(1)}</span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>peak</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -153,8 +162,8 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
         </div>
       </div>
 
-      {peak > 0 && series.length >= 2 ? (
-        <SessionGraph series={series} dark={dark} peak={peak} avg={avg} />
+      {peakAvg > 0 && series.length >= 2 ? (
+        <SessionGraph series={series} dark={dark} avg={avg} />
       ) : (
         <div style={{ marginTop: 14, fontSize: 12.5, color: 'var(--faint)', lineHeight: 1.5 }}>
           Run more sessions side by side to warm your Nube — color climbs from indigo to gold as you fan out.

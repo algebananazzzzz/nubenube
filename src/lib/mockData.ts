@@ -83,19 +83,73 @@ export const mockInsights = (range: RangeKey): Insights => ({
   peakSessions: range === 'today' ? 4 : 5,
   avgSessions: 2.3,
   sessionSeries: range === 'today'
-    ? [0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 2, 4, 3, 2, 3, 4, 2, 1].map((peak, h) => ({
-        label: `${String(h).padStart(2, '0')}:00`,
-        peak,
-        avg: peak ? Math.max(1, peak - 0.6) : 0,
-      }))
+    ? Array.from({ length: 96 }, (_, c) => {
+        // 96 × 15-min cells. Demo: app on from 07:00, a 12:00–13:00 gap, active
+        // windows 09:00–11:30 and 14:00–18:00, future after the current cell.
+        const now = new Date()
+        const nowCell = Math.floor((now.getHours() * 60 + now.getMinutes()) / 15)
+        const future = c > nowCell
+        const appOff = c >= 48 && c < 52
+        const present = !future && c >= 28 && !appOff
+        const inWin = (c >= 36 && c <= 46) || (c >= 56 && c <= 72)
+        const peak = present && inWin ? 1 + ((c * 7) % 4) : 0
+        return {
+          label: `${String(Math.floor((c * 15) / 60)).padStart(2, '0')}:${String((c * 15) % 60).padStart(2, '0')}`,
+          peak,
+          avg: peak ? Math.max(1, peak - 0.6) : 0,
+          present,
+          future,
+        }
+      })
+    : range === 'week'
+    ? Array.from({ length: 7 }, (_, day) =>
+        // full Mon–Sun × 12 two-hour blocks; future after "now". Busy 08:00–18:00.
+        Array.from({ length: 12 }, (_, b) => {
+          const now = new Date()
+          const wd = (now.getDay() + 6) % 7
+          const h0 = b * 2
+          const future = day > wd || (day === wd && h0 > now.getHours())
+          const present = !future && h0 >= 6
+          const inWin = h0 >= 8 && h0 <= 18
+          const peak = present && inWin ? 1 + ((day * 12 + b) % 4) : 0
+          return {
+            label: `06-0${day + 1}`,
+            peak,
+            avg: peak ? Math.max(1, peak - 0.6) : 0,
+            present,
+            future,
+          }
+        }),
+      ).flat()
+    : range === 'month'
+    ? (() => {
+        // full calendar month × 1 bar/day; future after today.
+        const now = new Date()
+        const mo = now.getMonth()
+        const days = new Date(now.getFullYear(), mo + 1, 0).getDate()
+        const todayD = now.getDate()
+        return Array.from({ length: days }, (_, i) => {
+          const day = i + 1
+          const future = day > todayD
+          const present = !future && day % 6 !== 0 // demo gap every 6th day
+          const peak = present ? 1 + (day % 5) : 0
+          return {
+            label: `${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+            peak,
+            avg: peak ? Math.max(1, peak - 0.6) : 0,
+            present,
+            future,
+          }
+        })
+      })()
     : [
-        { label: '06-01', peak: 2, avg: 1.4 },
-        { label: '06-02', peak: 3, avg: 1.8 },
-        { label: '06-03', peak: 1, avg: 1.0 },
-        { label: '06-04', peak: 4, avg: 2.6 },
-        { label: '06-05', peak: 3, avg: 2.1 },
-        { label: '06-06', peak: 5, avg: 3.0 },
-        { label: '06-07', peak: 4, avg: 2.3 },
+        { label: '06-01', peak: 2, avg: 1.4, present: true, future: false },
+        { label: '06-02', peak: 3, avg: 1.8, present: true, future: false },
+        { label: '06-03', peak: 0, avg: 0, present: false, future: false },
+        { label: '06-04', peak: 4, avg: 2.6, present: true, future: false },
+        { label: '06-05', peak: 3, avg: 2.1, present: true, future: false },
+        { label: '06-06', peak: 5, avg: 3.0, present: true, future: false },
+        { label: '06-07', peak: 4, avg: 2.3, present: true, future: false },
       ],
 })
 
@@ -113,12 +167,9 @@ export const mockSettings: Settings = {
     timeToDeathMin: 12,
     healDrainRatio: 0.1,
     idleThresholdSecs: 120,
-    windowGranularity: 'app',
+    dayOverrides: [{ weekday: 5, timeToDeathMin: 25, healDrainRatio: 0.2 }, { weekday: 6, timeToDeathMin: 25, healDrainRatio: 0.2 }],
   },
-  resetTimeLocal: '05:00',
-  pauseUntil: null,
   driftMomentIntensity: 'gentle-notification',
-  waterRates: { read: 0.0002, write: 0.0015 },
   logRoots: [],
   notificationSoundName: null,
   notificationSoundPath: null,
@@ -155,8 +206,8 @@ export const mockFocusTick: FocusTick = {
   secondsToDeath: null,
   activeSecsToday: Math.round(3.2 * 3600),
   distractSecsToday: 14 * 60,
+  driftSecsToday: 6 * 60,
   workSecsToday: Math.round(2.6 * 3600),
   monitoredSecsToday: Math.round(3.8 * 3600),
   frozen: false,
-  colorHue: 243,
 }

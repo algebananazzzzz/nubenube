@@ -4,7 +4,6 @@
 import { useFocus } from '../store/focus'
 import { usePrefs, type Theme } from '../store/prefs'
 import { useCountdown, useCountUp } from './useCountdown'
-import { rescue } from './rescue'
 import { hueClay, moodDrain, sessionTier, type Clay } from './clay'
 import type { FocusState, FocusTick } from '../types'
 
@@ -34,7 +33,6 @@ export function deriveSky(life: number, state: FocusState): Sky {
     case 'waiting': return 'alert'
     case 'drifting': return life < 55 ? 'danger' : 'worried'
     case 'chillin': return 'alert'
-    case 'paused': return 'calm'
     default: return 'idle'
   }
 }
@@ -69,7 +67,6 @@ export function statusFor(state: FocusState, appName: string | null): Status {
     case 'waiting': return { label: 'Waiting', tone: 'var(--accent)', pulse: true }
     case 'drifting': return { label: `Drifting · ${app}`, tone: 'var(--critical)', pulse: true }
     case 'chillin': return { label: `Chillin · ${app}`, tone: 'var(--teal)', pulse: false }
-    case 'paused': return { label: 'Paused', tone: 'var(--calm)', pulse: false }
     default: return { label: 'Idle', tone: 'var(--faint)', pulse: false }
   }
 }
@@ -78,7 +75,6 @@ export function statusFor(state: FocusState, appName: string | null): Status {
 export function cueFor(s: NubeState): { title: string; line: string } {
   const app = s.appName || 'a distraction'
   switch (s.effState) {
-    case 'paused': return { title: 'Paused', line: 'Tracking is off — nothing counts until you resume.' }
     case 'drifting': return { title: `Drifting · ${app}`, line: `Claude is waiting while you're on ${app} — Nube is draining.` }
     case 'chillin': return { title: `Chillin · ${app}`, line: `You're on ${app}. Nothing is waiting, so Nube is fine.` }
     case 'waiting': return { title: 'Waiting', line: 'Claude finished and is waiting on you.' }
@@ -89,7 +85,6 @@ export function cueFor(s: NubeState): { title: string; line: string } {
 
 // secondary metric caption (count/time), keyed by state
 export function timerFor(s: NubeState): string {
-  if (s.paused) return 'frozen'
   if (s.effState === 'drifting') return `${fmtClock(s.secondsToDeath ?? 0)} left`
   if (s.effState === 'vibing') return `${s.run} running`
   if (s.effState === 'waiting') return `${s.wait} waiting`
@@ -109,9 +104,7 @@ export type NubeState = {
   // live (ticking) "today" totals for the Home timers:
   work: number // session-weighted Claude-working secs (faster with more windows)
   distracted: number // seconds on a distraction
-  focused: number // present-&-tracking secs that weren't distraction (monitored − distracted)
-  paused: boolean
-  togglePause: () => void
+  drifted: number // seconds drifting (Claude waiting while on a distraction)
   mood: Mood
   sky: Sky
   clay: Clay
@@ -132,7 +125,6 @@ export function useNube(): NubeState {
   const baseline = tick.baseline || BASELINE
   const cap = tick.cap || CAP
   const effState = tick.state
-  const paused = effState === 'paused'
   const appName = tick.appName?.trim() ? tick.appName.trim() : null
   const run = tick.runningSessions ?? 0
   const wait = tick.waitingSessions ?? 0
@@ -148,7 +140,7 @@ export function useNube(): NubeState {
   // rather than the meter lagging the backend's ~2s ticks: liveLife == rawLife at
   // every backend anchor and falls at exactly the backend drain rate between them.
   const secondsToDeath = tick.secondsToDeath ?? null
-  const losing = !paused && effState === 'drifting' && secondsToDeath != null
+  const losing = effState === 'drifting' && secondsToDeath != null
   const remaining = useCountdown(losing ? secondsToDeath : null, losing)
   const life = losing && secondsToDeath && remaining != null
     ? Math.max(0, rawLife * (remaining / secondsToDeath))
@@ -160,26 +152,20 @@ export function useNube(): NubeState {
 
   const { satMul, ltAdd } = moodDrain(life)
   const clay = hueClay(tier.hue, satMul * tier.satScale, ltAdd)
-  const mood: Mood = paused
-    ? (life >= 100 ? 'content' : life >= 55 ? 'worried' : 'fading')
-    : deriveMood(life, cap)
-  const sky = paused ? 'calm' : deriveSky(life, effState)
+  const mood = deriveMood(life, cap)
+  const sky = deriveSky(life, effState)
 
   // Anchored to the backend totals; ticks locally each second while the state is
   // active so the Home clocks advance smoothly between ~2s backend updates.
-  const frozen = tick.frozen ?? paused
+  const frozen = tick.frozen ?? false
   const onDistraction = effState === 'drifting' || effState === 'chillin'
   const work = useCountUp(tick.workSecsToday ?? 0, !frozen ? run : 0) // +run/sec
   const distracted = useCountUp(distract, onDistraction ? 1 : 0)
-  const monitored = useCountUp(tick.monitoredSecsToday ?? 0, !frozen ? 1 : 0)
-  // present time that wasn't distraction; during a distraction both totals tick
-  // together so this holds, otherwise it advances with monitored.
-  const focused = Math.max(0, monitored - distracted)
+  const drifted = useCountUp(tick.driftSecsToday ?? 0, effState === 'drifting' ? 1 : 0)
 
   return {
     tick, theme, life, baseline, cap, effState, appName,
-    run, wait, work, distracted, focused,
-    paused, togglePause: () => { void rescue.setPaused(!paused) },
+    run, wait, work, distracted, drifted,
     mood, sky, clay, glow: tier.glow,
     secondsToDeath, remaining, countdownPct, fainting,
     fmtClock, fmtCountdown,

@@ -13,7 +13,6 @@ export type FocusState =
   | 'drifting' // on a distraction while a turn waits — life drains (countdown)
   | 'chillin' // on a distraction, nothing waiting (named, but no countdown)
   | 'idle' // away / nothing happening — life frozen
-  | 'paused' // user enabled break/pause mode
   | 'unknown'
 
 export type Project = {
@@ -35,7 +34,7 @@ export type RangeKey = 'today' | 'week' | 'month' | 'all'
 
 export type DistractionSlice = { name: string; secs: number }
 
-export type SessionPoint = { label: string; peak: number; avg: number }
+export type SessionPoint = { label: string; peak: number; avg: number; present: boolean; future: boolean }
 
 export type Insights = {
   range: RangeKey
@@ -45,7 +44,7 @@ export type Insights = {
   driftSecs: number // time on distractions
   distractionBreakdown: DistractionSlice[]
   peakSessions: number // max concurrent (running+waiting) over range
-  avgSessions: number // time-weighted avg concurrent while engaged
+  avgSessions: number // time-weighted avg concurrent over engaged time in the range
   sessionSeries: SessionPoint[] // time graph over the whole period
 }
 
@@ -71,10 +70,16 @@ export type FocusTick = {
   secondsToDeath?: number | null // honest net-rate countdown; only while net-draining
   activeSecsToday: number // today's states 1+2+3+4 (engaged or on a distraction)
   distractSecsToday: number // today's states 3+4 (on a distraction)
+  driftSecsToday: number // today's state 3 only (drifting — Claude waiting + distracted)
   workSecsToday: number // session-weighted Claude-working secs (Σ running·dt)
-  monitoredSecsToday: number // present-&-tracking wall-clock (all but paused/away)
-  frozen: boolean // meter frozen (paused or away/idle) — pause live UI timers
-  colorHue: number // active project's hue (drives accent + creature tint)
+  monitoredSecsToday: number // present-&-tracking wall-clock (all but away)
+  frozen: boolean // meter frozen (away/idle) — pause live UI timers
+}
+
+export type DayOverride = {
+  weekday: number // 0=Mon … 6=Sun
+  timeToDeathMin: number
+  healDrainRatio: number
 }
 
 export type Sensitivity = {
@@ -82,16 +87,13 @@ export type Sensitivity = {
   timeToDeathMin: number // minutes of one waiting session on a distraction, baseline → 0
   healDrainRatio: number // heal-per-running ÷ drain-per-waiting (default 0.1)
   idleThresholdSecs: number
-  windowGranularity: 'app' | 'title'
+  dayOverrides: DayOverride[] // per-weekday overrides of the two rate knobs (empty = same all week)
 }
 
 export type Settings = {
   distractionApps: string[]
   sensitivity: Sensitivity
-  resetTimeLocal: string // "HH:MM"
-  pauseUntil: string | null
   driftMomentIntensity: 'passive' | 'gentle-notification' | 'overlay'
-  waterRates: { read: number; write: number }
   logRoots: string[]
   notificationSoundName: string | null
   notificationSoundPath: string | null

@@ -32,10 +32,7 @@ pub fn run() {
     tauri::Builder::default()
         // Single-instance MUST be first: focus the running window.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            commands::show_main(app);
         }))
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
@@ -97,12 +94,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .tooltip("Nube Nube")
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "open" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
+                    "open" => commands::show_main(app),
                     "quit" => app.exit(0),
                     _ => {}
                 });
@@ -118,6 +110,7 @@ pub fn run() {
                 .resizable(false)
                 .decorations(false)
                 .transparent(true)
+                .shadow(false) // kill the macOS window shadow (the gray halo box)
                 .always_on_top(true)
                 .visible_on_all_workspaces(true)
                 .skip_taskbar(true)
@@ -144,7 +137,6 @@ pub fn run() {
             commands::nube_open_main,
             commands::nube_set_companion,
             commands::nube_resize_companion,
-            commands::nube_set_paused,
             commands::get_known_apps,
             commands::list_running_apps,
             commands::install_notification_sound,
@@ -158,10 +150,7 @@ pub fn run() {
             // macOS: clicking the Dock icon after close-to-tray re-shows the window.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                }
+                commands::show_main(app);
             }
             let _ = (app, &event);
         });

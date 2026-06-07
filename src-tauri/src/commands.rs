@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rusqlite::Connection;
 use serde::Serialize;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
 use tauri_plugin_updater::UpdaterExt;
@@ -13,6 +14,21 @@ use crate::{connector, db, dto::*, hooks_installer, store_paths};
 pub struct AppState {
     pub db_path: PathBuf,
     pub config_dir: PathBuf,
+}
+
+/// Open a short-lived DB connection, run `f`, and fall back to `T::default()` if
+/// the open fails (WAL handles concurrency with the connector + drift threads).
+fn with_db<T: Default>(db_path: &Path, f: impl FnOnce(&Connection) -> T) -> T {
+    db::open(db_path).map(|c| f(&c)).unwrap_or_default()
+}
+
+/// Reveal + focus the main window (tray, dock-reopen, single-instance, open cmd).
+pub fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
 }
 
 fn roots_str() -> Vec<String> {
@@ -41,12 +57,12 @@ fn conn_status(db_path: &Path) -> ConnectionStatus {
 
 #[tauri::command]
 pub fn get_projects(state: State<AppState>) -> Vec<Project> {
-    db::open(&state.db_path).map(|c| db::get_projects(&c)).unwrap_or_default()
+    with_db(&state.db_path, db::get_projects)
 }
 
 #[tauri::command]
 pub fn get_totals(state: State<AppState>) -> Totals {
-    db::open(&state.db_path).map(|c| db::get_totals(&c)).unwrap_or_default()
+    with_db(&state.db_path, db::get_totals)
 }
 
 #[tauri::command]
@@ -64,7 +80,7 @@ pub fn get_connection_status(state: State<AppState>) -> ConnectionStatus {
 
 #[tauri::command]
 pub fn get_project_detail(state: State<AppState>, id: String, range: String) -> Option<ProjectDetail> {
-    db::open(&state.db_path).ok().and_then(|c| db::get_project_detail(&c, &id, &range))
+    with_db(&state.db_path, |c| db::get_project_detail(c, &id, &range))
 }
 
 #[tauri::command]
@@ -102,7 +118,7 @@ pub fn uninstall_hooks(state: State<AppState>) -> ConnectionStatus {
 /// calls `nube_resize_companion` to fit its measured content exactly.
 pub const COMPANION_FULL: (f64, f64) = (232.0, 300.0);
 
-/// Nestle the always-on-top companion into the bottom-right of its monitor.
+/// Nestle the always-on-top companion into the top-right of its monitor.
 pub fn position_companion(w: &WebviewWindow) {
     let mon = w
         .current_monitor()
@@ -120,20 +136,16 @@ pub fn position_companion(w: &WebviewWindow) {
             )
         });
         let margin = (24.0 * scale) as i32;
-        let dock = (40.0 * scale) as i32; // clear the macOS dock / taskbar
+        let top = (30.0 * scale) as i32; // clear the macOS menu bar
         let x = mpos.x + msize.width as i32 - win.width as i32 - margin;
-        let y = mpos.y + msize.height as i32 - win.height as i32 - margin - dock;
+        let y = mpos.y + top;
         let _ = w.set_position(PhysicalPosition::new(x.max(mpos.x), y.max(mpos.y)));
     }
 }
 
 #[tauri::command]
 pub fn nube_open_main(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    show_main(&app);
 }
 
 /// macOS: float the companion over everything (incl. other apps' full-screen
@@ -177,8 +189,8 @@ pub fn nube_set_companion(app: AppHandle, visible: bool) {
 }
 
 /// Resize the companion to the webview's measured content size, pinning the
-/// bottom-right corner so it grows up/left (never slides under the Dock, keeps a
-/// user-dragged position). Sync → main thread, so the pre-resize rect is real.
+/// top-right corner so it grows down/left (drops downward, keeps a user-dragged
+/// position). Sync → main thread, so the pre-resize rect is real.
 #[tauri::command]
 pub fn nube_resize_companion(app: AppHandle, width: f64, height: f64) {
     if let Some(w) = app.get_webview_window("companion") {
@@ -187,16 +199,15 @@ pub fn nube_resize_companion(app: AppHandle, width: f64, height: f64) {
         }
         let scale = w.scale_factor().unwrap_or(1.0);
         let new_w = (width * scale).round() as i32;
-        let new_h = (height * scale).round() as i32;
-        // bottom-right corner (physical px) BEFORE the resize → our anchor.
+        // top-right corner (physical px) BEFORE the resize → our anchor.
         let anchor = match (w.outer_position(), w.outer_size()) {
-            (Ok(pos), Ok(size)) => Some((pos.x + size.width as i32, pos.y + size.height as i32)),
+            (Ok(pos), Ok(size)) => Some((pos.x + size.width as i32, pos.y)),
             _ => None,
         };
         let _ = w.set_size(LogicalSize::new(width, height));
         match anchor {
-            Some((right, bottom)) => {
-                let _ = w.set_position(PhysicalPosition::new(right - new_w, bottom - new_h));
+            Some((right, top)) => {
+                let _ = w.set_position(PhysicalPosition::new(right - new_w, top));
             }
             None => position_companion(&w), // no rect yet → dock to the corner
         }
@@ -204,22 +215,9 @@ pub fn nube_resize_companion(app: AppHandle, width: f64, height: f64) {
     }
 }
 
-/// Toggle indefinite pause via a far-future pauseUntil (matches the frontend
-/// PAUSE_SENTINEL); the drift loop picks it up within ~2s.
-#[tauri::command]
-pub fn nube_set_paused(state: State<AppState>, paused: bool) {
-    let mut s = crate::settings::load(&state.config_dir);
-    s.pause_until = if paused {
-        Some("9999-12-31T23:59:59Z".to_string())
-    } else {
-        None
-    };
-    crate::settings::save(&state.config_dir, &s);
-}
-
 #[tauri::command]
 pub fn get_known_apps(state: State<AppState>) -> Vec<KnownApp> {
-    db::open(&state.db_path).map(|c| db::get_known_apps(&c)).unwrap_or_default()
+    with_db(&state.db_path, db::get_known_apps)
 }
 
 // ── notification sound ────────────────────────────────────────────────────────

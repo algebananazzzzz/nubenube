@@ -30,29 +30,16 @@ function Countdown({ s, compact }: { s: NubeState; compact?: boolean }) {
   )
 }
 
-function PauseButton({ s, size = 'md', full }: { s: NubeState; size?: 'sm' | 'md' | 'lg'; full?: boolean }) {
-  return (
-    <Btn variant={s.paused ? 'primary' : 'line'} size={size} full={full} onClick={s.togglePause} style={{ gap: 8 }}>
-      {s.paused
-        ? <svg width="12" height="13" viewBox="0 0 13 14" fill="currentColor"><path d="M2 1.2v11.6a.6.6 0 0 0 .92.5l9-5.8a.6.6 0 0 0 0-1l-9-5.8A.6.6 0 0 0 2 1.2z" /></svg>
-        : <svg width="11" height="13" viewBox="0 0 12 14" fill="currentColor"><rect x="1" y="1" width="3.6" height="12" rx="1.2" /><rect x="7.4" y="1" width="3.6" height="12" rx="1.2" /></svg>}
-      {s.paused ? 'Resume tracking' : 'Pause'}
-    </Btn>
-  )
-}
-
 function HeroCockpit() {
   const s = useNube()
   const navigate = useNavigate()
   const st = statusFor(s.effState, s.appName)
   const cue = cueFor(s)
   const over = s.life - s.baseline
-  const lifeTone = s.paused ? 'var(--faint)' : s.life >= 100 ? 'var(--success)' : s.life < 30 ? 'var(--critical)' : 'var(--warning)'
-  const deltaPill = s.paused
-    ? <Pill kind="neutral" style={{ fontSize: 11.5 }}>frozen</Pill>
-    : over >= 0
-      ? <Pill tone="mint" style={{ fontSize: 11.5 }}>+{Math.round(over)}% banked</Pill>
-      : <Pill tone={s.life < 30 ? 'danger' : 'amber'} style={{ fontSize: 11.5 }}>{Math.round(over)}% below start</Pill>
+  const lifeTone = s.life >= 100 ? 'var(--success)' : s.life < 30 ? 'var(--critical)' : 'var(--warning)'
+  const deltaPill = over >= 0
+    ? <Pill tone="mint" style={{ fontSize: 11.5 }}>+{Math.round(over)}% banked</Pill>
+    : <Pill tone={s.life < 30 ? 'danger' : 'amber'} style={{ fontSize: 11.5 }}>{Math.round(over)}% below start</Pill>
 
   return (
     <Card pad={0} style={{ overflow: 'hidden', display: 'flex', minHeight: 312 }}>
@@ -63,11 +50,6 @@ function HeroCockpit() {
             <Nube mood={s.mood} size={172} glow={s.glow} />
           </div>
         </Sky>
-        {s.paused && (
-          <div style={{ position: 'absolute', bottom: 14, left: 0, right: 0, textAlign: 'center' }}>
-            <span className="nn-eyebrow" style={{ fontSize: 10, letterSpacing: '.2em', color: 'var(--faint)' }}>paused</span>
-          </div>
-        )}
       </div>
 
       {/* right — facts + action */}
@@ -97,8 +79,7 @@ function HeroCockpit() {
         <div style={{ marginTop: 12 }}><LifeBar life={s.life} baseline={s.baseline} cap={s.cap} height={10} /></div>
 
         <div style={{ display: 'flex', gap: 9, marginTop: 18 }}>
-          <PauseButton s={s} />
-          <Btn variant="ghost" onClick={() => navigate('/insights')}>View insights</Btn>
+          <Btn variant="soft" full onClick={() => navigate('/insights')}>View insights</Btn>
         </div>
       </div>
     </Card>
@@ -126,7 +107,7 @@ function TodayStrip() {
       <div style={{ display: 'flex', gap: 10, marginTop: 13 }}>
         <TimerTile label="Claude working" value={s.work} tone="var(--success)" badge={s.run > 1 ? `×${s.run}` : null} fmt={s.fmtCountdown} />
         <TimerTile label="Distracted" value={s.distracted} tone="var(--warning)" fmt={s.fmtCountdown} />
-        <TimerTile label="Focused" value={s.focused} tone="var(--accent)" fmt={s.fmtCountdown} />
+        <TimerTile label="Drifted" value={s.drifted} tone="var(--critical)" fmt={s.fmtCountdown} />
       </div>
     </Card>
   )

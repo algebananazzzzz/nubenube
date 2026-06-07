@@ -65,7 +65,7 @@ function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: 
   return (
     <div ref={innerRef} className="nn-ui" style={{
       width: CARD_W, borderRadius: 'var(--r-lg)', overflow: 'hidden',
-      background: 'var(--surface)', boxShadow: 'var(--shadow-lg)',
+      background: 'var(--surface)',
       border: '1px solid var(--line)', userSelect: 'none',
       animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
     }}>
@@ -99,7 +99,7 @@ function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: 
         </div>
 
         <div style={{ display: 'flex', gap: 6, marginTop: 9 }}>
-          <Btn variant="soft" size="sm" full onClick={s.togglePause}>{s.paused ? 'Resume' : 'Pause'}</Btn>
+          <Btn variant="soft" size="sm" full onClick={() => void rescue.openMain()}>Open Nube</Btn>
           <button onClick={onMinimize} title="Minimize" style={{ flexShrink: 0, width: 32, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--text)', cursor: 'pointer', fontSize: 15, fontWeight: 700 }}>–</button>
         </div>
       </div>
@@ -116,7 +116,7 @@ function CompanionMini({ s, onExpand, innerRef }: { s: NubeState; onExpand: () =
     // inline-flex → the pill is exactly as wide as its content (no trailing gap)
     <div ref={innerRef} data-tauri-drag-region title={st.label} style={{
       display: 'inline-flex', alignItems: 'center', gap: 9, height: 44, padding: '0 14px 0 6px',
-      borderRadius: 'var(--r-pill)', background: 'var(--surface)', boxShadow: 'var(--shadow-lg)',
+      borderRadius: 'var(--r-pill)', background: 'var(--surface)',
       border: '1px solid var(--line)', cursor: 'grab', userSelect: 'none', whiteSpace: 'nowrap',
       animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
     }} className="nn-ui">
@@ -172,12 +172,12 @@ export function Companion() {
   // windows): when a session newly enters the waiting phase — Claude finished a
   // turn and is now waiting on you — ring the chime. Keyed off waitingSessions
   // (which counts regardless of foreground app), so it fires even if you've
-  // already wandered off. Suppressed while paused.
+  // already wandered off.
   useEffect(() => {
     const rose = tick.waitingSessions > prevWaiting.current
     prevWaiting.current = tick.waitingSessions
-    if (rose && sound && tick.state !== 'paused') playChime(chimeVoice, chimeVolume)
-  }, [tick.waitingSessions, tick.state, sound, chimeVoice, chimeVolume])
+    if (rose && sound) playChime(chimeVoice, chimeVolume)
+  }, [tick.waitingSessions, sound, chimeVoice, chimeVolume])
 
   useEffect(() => { document.documentElement.setAttribute('data-theme', s.theme) }, [s.theme])
 
@@ -205,7 +205,7 @@ export function Companion() {
   return (
     // fit-content + padding → the wrapper hugs the card and leaves room for the
     // soft shadow; the window is then sized to (card + padding) by the effect.
-    <div className="nn-app" data-theme={s.theme} style={{ ...themeVars(s.theme, s.clay), width: 'fit-content', padding: PAD, background: 'transparent', filter: s.paused ? 'saturate(.7)' : 'none' }}>
+    <div className="nn-app" data-theme={s.theme} style={{ ...themeVars(s.theme, s.clay), width: 'fit-content', padding: PAD, background: 'transparent' }}>
       {mini
         ? <CompanionMini s={s} innerRef={cardRef} onExpand={() => setPref('companionMini', false)} />
         : <CompanionCard s={s} innerRef={cardRef} onMinimize={() => setPref('companionMini', true)} />}

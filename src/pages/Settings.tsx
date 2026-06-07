@@ -10,6 +10,7 @@ import { checkForUpdates } from '../lib/updater'
 import { armChimeUnlock, playChime, CHIME_VOICES, type ChimeVoice } from '../lib/chime'
 import { Card, Pill, Btn, Dot, Toggle, SegTabs } from '../components/ui'
 import { version } from '../../package.json'
+import type { Settings as SettingsT, Sensitivity, DayOverride } from '../types'
 
 const VOICE_LABEL: Record<ChimeVoice, string> = {
   bell: 'Bell', marimba: 'Marimba', chord: 'Chord', koto: 'Koto', blip: 'Blip',
@@ -91,6 +92,82 @@ function SectionTitle({ children, right }: { children: ReactNode; right?: ReactN
       <div className="nn-disp" style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', flex: 1 }}>{children}</div>
       {right}
     </div>
+  )
+}
+
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const DAY_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+const WEEKDAYS = [0, 1, 2, 3, 4]
+const WEEKEND = [5, 6]
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
+
+// "How Nube reacts": the two rate knobs are per-weekday — pick a day and edit, or
+// apply the day's values to a whole group. Grace stays a single global knob.
+function HowNubeReacts({ sens, save }: { sens: Sensitivity; save: (patch: Partial<SettingsT>) => Promise<void> }) {
+  const [day, setDay] = useState(() => (new Date().getDay() + 6) % 7) // 0=Mon … 6=Sun
+  const overrides = sens.dayOverrides ?? []
+  const ovr = (wd: number) => overrides.find((o) => o.weekday === wd)
+  const ttdFor = (wd: number) => ovr(wd)?.timeToDeathMin ?? sens.timeToDeathMin
+  const ratioFor = (wd: number) => ovr(wd)?.healDrainRatio ?? sens.healDrainRatio
+  const differs = (wd: number) =>
+    Math.round(ttdFor(wd)) !== Math.round(sens.timeToDeathMin) ||
+    Math.round(ratioFor(wd) * 100) !== Math.round(sens.healDrainRatio * 100)
+
+  const writeOverrides = (next: DayOverride[]) =>
+    void save({ sensitivity: { ...sens, dayOverrides: next.sort((a, b) => a.weekday - b.weekday) } })
+  const upsertDay = (wd: number, patch: Partial<DayOverride>) =>
+    writeOverrides([
+      ...overrides.filter((o) => o.weekday !== wd),
+      { weekday: wd, timeToDeathMin: ttdFor(wd), healDrainRatio: ratioFor(wd), ...patch },
+    ])
+  const applyToDays = (wds: number[]) => {
+    const ttd = ttdFor(day)
+    const ratio = ratioFor(day)
+    writeOverrides([
+      ...overrides.filter((o) => !wds.includes(o.weekday)),
+      ...wds.map((wd) => ({ weekday: wd, timeToDeathMin: ttd, healDrainRatio: ratio })),
+    ])
+  }
+
+  const chip = (wd: number) => {
+    const on = wd === day
+    const weekend = wd >= 5
+    return (
+      <button
+        key={wd}
+        onClick={() => setDay(wd)}
+        className="nn-ui"
+        style={{
+          position: 'relative', padding: '6px 11px', borderRadius: 'var(--r-sm)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          border: `1px solid ${on ? 'var(--accent-border)' : 'var(--line)'}`,
+          background: on ? 'var(--accent-surface)' : 'var(--surface-faint)',
+          color: on ? 'var(--accent-text)' : weekend ? 'var(--teal)' : 'var(--text)',
+        }}
+      >
+        {DAY_LABELS[wd]}
+        {differs(wd) && <span style={{ position: 'absolute', top: 4, right: 5, width: 4, height: 4, borderRadius: '50%', background: on ? 'var(--accent-text)' : 'var(--accent)' }} />}
+      </button>
+    )
+  }
+
+  return (
+    <Card pad={20}>
+      <SectionTitle>How Nube reacts</SectionTitle>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{WEEKDAYS.map(chip)}</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>{WEEKEND.map(chip)}</div>
+      <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 10 }}>
+        Editing <b style={{ color: 'var(--ink)' }}>{DAY_FULL[day]}</b> · a dot marks days that differ from the default.
+      </div>
+      <SliderRow title="Nube dies after" value={Math.round(ttdFor(day))} min={1} max={60} step={1} onChange={(v) => upsertDay(day, { timeToDeathMin: v })} accent="var(--warning)" fmt={(v) => `${v} mins of drift`} />
+      <SliderRow title="Health restoration" value={Math.round(ratioFor(day) * 100)} min={1} max={50} step={1} onChange={(v) => upsertDay(day, { healDrainRatio: v / 100 })} accent="var(--success)" fmt={(v) => `factor of ${v}%`} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 0 16px', borderBottom: '1px solid var(--line-faint)' }}>
+        <span style={{ fontSize: 12, color: 'var(--faint)' }}>Apply values to:</span>
+        <Btn variant="line" size="sm" onClick={() => applyToDays(WEEKDAYS)}>Weekdays</Btn>
+        <Btn variant="line" size="sm" onClick={() => applyToDays(WEEKEND)}>Weekends</Btn>
+        <Btn variant="line" size="sm" onClick={() => applyToDays(ALL_DAYS)}>All</Btn>
+      </div>
+      <SliderRow title="Grace period before draining" value={sens.graceSecs} min={1} max={60} step={1} onChange={(v) => void save({ sensitivity: { ...sens, graceSecs: v } })} accent="var(--warning)" fmt={(v) => `${v}s`} last />
+    </Card>
   )
 }
 
@@ -192,7 +269,6 @@ export function Settings() {
   }
 
   const sens = settings.sensitivity
-  const setSens = (patch: Partial<typeof sens>) => void save({ sensitivity: { ...sens, ...patch } })
 
   return (
     <div>
@@ -228,12 +304,7 @@ export function Settings() {
 
         {/* RIGHT */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Card pad={20}>
-            <SectionTitle>How Nube reacts</SectionTitle>
-            <SliderRow title="Nube dies after" value={Math.round(sens.timeToDeathMin)} min={1} max={60} step={1} onChange={(v) => setSens({ timeToDeathMin: v })} accent="var(--warning)" fmt={(v) => `${v} mins of drift`} />
-            <SliderRow title="Health restoration" value={Math.round(sens.healDrainRatio * 100)} min={1} max={50} step={1} onChange={(v) => setSens({ healDrainRatio: v / 100 })} accent="var(--success)" fmt={(v) => `factor of ${v}%`} />
-            <SliderRow title="Grace period before draining" value={sens.graceSecs} min={1} max={60} step={1} onChange={(v) => setSens({ graceSecs: v })} accent="var(--warning)" fmt={(v) => `${v}s`} last />
-          </Card>
+          <HowNubeReacts sens={sens} save={save} />
 
           <Card pad={20}>
             <SectionTitle>Preferences</SectionTitle>
@@ -294,9 +365,6 @@ export function Settings() {
                 {notifSoundError && <div style={{ fontSize: 12, color: 'var(--critical)', marginTop: 6 }}>{notifSoundError}</div>}
               </PrefRow>
             )}
-            <PrefRow title="Daily reset" desc="Life resets to 100% at this time.">
-              <input type="time" value={settings.resetTimeLocal} onChange={(e) => void save({ resetTimeLocal: e.target.value })} className="nn-num" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '7px 11px', colorScheme: theme }} />
-            </PrefRow>
             <PrefRow title="Updates" desc={`v${version}`} last>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <SegTabs<UpdateChannel> tabs={[{ key: 'stable', label: 'Stable' }, { key: 'beta', label: 'Beta' }]} value={updateChannel} onChange={(v) => setPref('updateChannel', v)} size="sm" />

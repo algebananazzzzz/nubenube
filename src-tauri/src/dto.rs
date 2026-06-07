@@ -41,9 +41,11 @@ pub struct DistractionSlice {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPoint {
-    pub label: String, // bucket label: "HH:00" (today) or "MM-DD" (daily)
-    pub peak: i64,     // max concurrent (running+waiting) in the bucket
-    pub avg: f64,      // time-weighted avg concurrent while engaged
+    pub label: String,  // bucket label: "HH:MM" (today, 15-min) or "MM-DD" (daily)
+    pub peak: i64,      // max concurrent (running+waiting) in the bucket
+    pub avg: f64,       // time-weighted avg concurrent while engaged
+    pub present: bool,  // false = app wasn't running this bucket (no data, not a real 0)
+    pub future: bool,   // true = bucket is after "now" in the today grid (not yet)
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -56,7 +58,7 @@ pub struct Insights {
     pub drift_secs: i64,         // time on distractions
     pub distraction_breakdown: Vec<DistractionSlice>,
     pub peak_sessions: i64,      // max concurrent (running+waiting) over range
-    pub avg_sessions: f64,       // time-weighted avg concurrent while engaged
+    pub avg_sessions: f64,       // time-weighted avg concurrent over engaged time in the range
     pub session_series: Vec<SessionPoint>, // time graph over the whole period
 }
 
@@ -103,14 +105,13 @@ pub struct FocusTickDto {
     pub waiting_sessions: i64,
     pub running_sessions: i64,
     pub seconds_to_death: Option<i64>,
-    /// Today's (reset-day) activity secs: active = states 1-4; distract = 3-4
-    /// (active − distract = focused); work = Σ running·dt; monitored = tracked time.
+    /// Today's (reset-day) activity secs: active = states 1-4; distract = 3-4;
+    /// drift = state 3 only (drifting); work = Σ running·dt; monitored = tracked time.
     pub active_secs_today: i64,
     pub distract_secs_today: i64,
+    pub drift_secs_today: i64,
     pub work_secs_today: i64,
     pub monitored_secs_today: i64,
-    /// Meter frozen (paused or away/idle) — UI stops its local live timers.
+    /// Meter frozen (away/idle) — UI stops its local live timers.
     pub frozen: bool,
-    /// Active project's hue (drives the accent + creature tint), 0..360.
-    pub color_hue: i64,
 }
