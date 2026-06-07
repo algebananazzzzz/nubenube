@@ -449,6 +449,17 @@ impl DriftRuntime {
             }
         }
 
+        // Concurrency history (peak + time-weighted avg) at hourly resolution so
+        // the insights time graph can plot the whole period; idle/paused excluded.
+        if !frozen {
+            let total_sessions = running_count + waiting_total;
+            if total_sessions > 0 {
+                if let Some(c) = &conn {
+                    db::add_session_sample(c, &today, now_local.hour() as i64, total_sessions, dts);
+                }
+            }
+        }
+
         if let (Some(c), Some(pid)) = (&conn, self.project_id.as_deref()) {
             db::save_health(c, pid, self.health, &reset_day);
         }

@@ -18,7 +18,7 @@ use crate::water;
 
 /// Bump when the schema (tables/indexes/backfills below) changes so the one-shot
 /// migration re-runs. Stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 4;
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
@@ -114,6 +114,20 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             distract_secs  INTEGER NOT NULL DEFAULT 0,
             work_secs      INTEGER NOT NULL DEFAULT 0,
             monitored_secs INTEGER NOT NULL DEFAULT 0
+        );
+        -- concurrency history at hourly resolution so "today" plots a time graph
+        -- and longer ranges aggregate up to days. peak = MAX(running+waiting) in
+        -- the hour; session_secs = Σ (running+waiting)·dt; engaged_secs = Σ dt
+        -- while >0 (avg concurrent = session_secs / engaged_secs). Keyed by
+        -- calendar day/hour to match the drift_daily range filter.
+        DROP TABLE IF EXISTS session_stats;
+        CREATE TABLE IF NOT EXISTS session_hourly (
+            local_day    TEXT NOT NULL,
+            local_hour   INTEGER NOT NULL,
+            peak         INTEGER NOT NULL DEFAULT 0,
+            session_secs INTEGER NOT NULL DEFAULT 0,
+            engaged_secs INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (local_day, local_hour)
         );
         "#,
     )?;
@@ -251,6 +265,116 @@ pub fn load_day_stats(conn: &Connection, day: &str) -> (i64, i64, i64, i64) {
     .ok()
     .flatten()
     .unwrap_or((0, 0, 0, 0))
+}
+
+/// Sample concurrency into the current hour bucket: bump the hour's peak, and
+/// accumulate session-seconds + engaged-seconds for the time-weighted average.
+/// `total` = running + waiting; call only while not frozen and total > 0.
+pub fn add_session_sample(conn: &Connection, day: &str, hour: i64, total: i64, dt_secs: i64) {
+    if total <= 0 || dt_secs <= 0 {
+        return;
+    }
+    let _ = conn.execute(
+        "INSERT INTO session_hourly(local_day,local_hour,peak,session_secs,engaged_secs)
+            VALUES(?1,?2,?3,?4,?5)
+         ON CONFLICT(local_day,local_hour) DO UPDATE SET
+            peak         = MAX(peak, ?3),
+            session_secs = session_secs + ?4,
+            engaged_secs = engaged_secs + ?5",
+        params![day, hour, total, total * dt_secs, dt_secs],
+    );
+}
+
+fn point(label: String, peak: i64, secs: i64, eng: i64) -> SessionPoint {
+    SessionPoint {
+        label,
+        peak,
+        avg: if eng > 0 { secs as f64 / eng as f64 } else { 0.0 },
+    }
+}
+
+/// Range-scoped concurrency: (peak, time-weighted avg, time series). The series
+/// spans the whole chosen period, zero-filled so it reads as a continuous time
+/// graph: hourly for "today", daily otherwise (capped to the most recent 60).
+pub fn session_insights(conn: &Connection, range: &str) -> (i64, f64, Vec<SessionPoint>) {
+    if range == "today" {
+        let day = today_str();
+        // hour -> (peak, session_secs, engaged_secs)
+        let mut by_hour: HashMap<i64, (i64, i64, i64)> = HashMap::new();
+        if let Ok(mut st) = conn.prepare(
+            "SELECT local_hour, peak, session_secs, engaged_secs
+             FROM session_hourly WHERE local_day=?1",
+        ) {
+            if let Ok(it) = st.query_map([&day], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?))
+            }) {
+                for row in it.flatten() {
+                    by_hour.insert(row.0, (row.1, row.2, row.3));
+                }
+            }
+        }
+        let now_hour = Local::now().hour() as i64;
+        let mut peak = 0i64;
+        let (mut sum_secs, mut sum_eng) = (0i64, 0i64);
+        let mut series = Vec::with_capacity((now_hour + 1) as usize);
+        for h in 0..=now_hour {
+            let (p, secs, eng) = by_hour.get(&h).copied().unwrap_or((0, 0, 0));
+            peak = peak.max(p);
+            sum_secs += secs;
+            sum_eng += eng;
+            series.push(point(format!("{h:02}:00"), p, secs, eng));
+        }
+        let avg = if sum_eng > 0 { sum_secs as f64 / sum_eng as f64 } else { 0.0 };
+        return (peak, avg, series);
+    }
+
+    // daily resolution: aggregate hours into days, zero-fill the whole span.
+    let mut by_day: HashMap<String, (i64, i64, i64)> = HashMap::new();
+    let start = range_start_day(range);
+    if let Ok(mut st) = conn.prepare(
+        "SELECT local_day, MAX(peak), COALESCE(SUM(session_secs),0), COALESCE(SUM(engaged_secs),0)
+         FROM session_hourly WHERE local_day >= ?1 GROUP BY local_day",
+    ) {
+        if let Ok(it) = st.query_map([&start], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?))
+        }) {
+            for row in it.flatten() {
+                by_day.insert(row.0, (row.1, row.2, row.3));
+            }
+        }
+    }
+
+    // first day of the span: range start, or the earliest recorded day for "all".
+    let first = if start.is_empty() {
+        conn.query_row("SELECT MIN(local_day) FROM session_hourly", [], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten()
+    } else {
+        Some(start)
+    };
+
+    let mut series: Vec<SessionPoint> = Vec::new();
+    let (mut peak, mut sum_secs, mut sum_eng) = (0i64, 0i64, 0i64);
+    if let Some(first) = first {
+        if let Ok(start_date) = chrono::NaiveDate::parse_from_str(&first, "%Y-%m-%d") {
+            let end_date = Local::now().date_naive();
+            let mut d = start_date;
+            while d <= end_date {
+                let key = d.format("%Y-%m-%d").to_string();
+                let (p, secs, eng) = by_day.get(&key).copied().unwrap_or((0, 0, 0));
+                peak = peak.max(p);
+                sum_secs += secs;
+                sum_eng += eng;
+                series.push(point(d.format("%m-%d").to_string(), p, secs, eng));
+                d += Duration::days(1);
+            }
+        }
+    }
+    if series.len() > 60 {
+        series.drain(0..series.len() - 60);
+    }
+    let avg = if sum_eng > 0 { sum_secs as f64 / sum_eng as f64 } else { 0.0 };
+    (peak, avg, series)
 }
 
 /// First local_day to include for an insights range ("" = no lower bound).
@@ -605,6 +729,8 @@ pub fn get_insights(conn: &Connection, range: &str) -> Insights {
         .map(|(name, secs)| DistractionSlice { name, secs })
         .collect();
 
+    let (peak_sessions, avg_sessions, session_series) = session_insights(conn, range);
+
     Insights {
         range: range.to_string(),
         tokens,
@@ -612,6 +738,9 @@ pub fn get_insights(conn: &Connection, range: &str) -> Insights {
         claude_idle_secs: idle,
         drift_secs: drift,
         distraction_breakdown,
+        peak_sessions,
+        avg_sessions,
+        session_series,
     }
 }
 

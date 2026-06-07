@@ -35,6 +35,8 @@ export type RangeKey = 'today' | 'week' | 'month' | 'all'
 
 export type DistractionSlice = { name: string; secs: number }
 
+export type SessionPoint = { label: string; peak: number; avg: number }
+
 export type Insights = {
   range: RangeKey
   tokens: TokenBreakdown // token composition for the range
@@ -42,6 +44,9 @@ export type Insights = {
   claudeIdleSecs: number // Claude idle, waiting on you
   driftSecs: number // time on distractions
   distractionBreakdown: DistractionSlice[]
+  peakSessions: number // max concurrent (running+waiting) over range
+  avgSessions: number // time-weighted avg concurrent while engaged
+  sessionSeries: SessionPoint[] // time graph over the whole period
 }
 
 export type ProjectDetail = {

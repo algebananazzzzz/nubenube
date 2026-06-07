@@ -38,6 +38,14 @@ pub struct DistractionSlice {
     pub secs: i64,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionPoint {
+    pub label: String, // bucket label: "HH:00" (today) or "MM-DD" (daily)
+    pub peak: i64,     // max concurrent (running+waiting) in the bucket
+    pub avg: f64,      // time-weighted avg concurrent while engaged
+}
+
 #[derive(Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Insights {
@@ -47,6 +55,9 @@ pub struct Insights {
     pub claude_idle_secs: i64,   // Claude idle, waiting on you
     pub drift_secs: i64,         // time on distractions
     pub distraction_breakdown: Vec<DistractionSlice>,
+    pub peak_sessions: i64,      // max concurrent (running+waiting) over range
+    pub avg_sessions: f64,       // time-weighted avg concurrent while engaged
+    pub session_series: Vec<SessionPoint>, // time graph over the whole period
 }
 
 #[derive(Serialize, Clone)]

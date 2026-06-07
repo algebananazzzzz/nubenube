@@ -80,6 +80,23 @@ export const mockInsights = (range: RangeKey): Insights => ({
     { name: 'ChatGPT Atlas', secs: 36 },
     { name: 'Telegram', secs: 26 },
   ],
+  peakSessions: range === 'today' ? 4 : 5,
+  avgSessions: 2.3,
+  sessionSeries: range === 'today'
+    ? [0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 2, 4, 3, 2, 3, 4, 2, 1].map((peak, h) => ({
+        label: `${String(h).padStart(2, '0')}:00`,
+        peak,
+        avg: peak ? Math.max(1, peak - 0.6) : 0,
+      }))
+    : [
+        { label: '06-01', peak: 2, avg: 1.4 },
+        { label: '06-02', peak: 3, avg: 1.8 },
+        { label: '06-03', peak: 1, avg: 1.0 },
+        { label: '06-04', peak: 4, avg: 2.6 },
+        { label: '06-05', peak: 3, avg: 2.1 },
+        { label: '06-06', peak: 5, avg: 3.0 },
+        { label: '06-07', peak: 4, avg: 2.3 },
+      ],
 })
 
 export const mockConnection: ConnectionStatus = {
