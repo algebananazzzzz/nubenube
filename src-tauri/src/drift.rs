@@ -461,6 +461,9 @@ impl DriftRuntime {
                 if distract_delta > 0 {
                     db::add_distract_sample(&tx, &today, slot, distract_delta);
                 }
+                if work_app_delta > 0 {
+                    db::add_work_sample(&tx, &today, slot, work_app_delta);
+                }
                 if !frozen {
                     let total_sessions = running_count + waiting_total;
                     if total_sessions > 0 {

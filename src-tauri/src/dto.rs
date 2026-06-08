@@ -45,6 +45,7 @@ pub struct SessionPoint {
     pub peak: i64,      // max concurrent (running+waiting) in the bucket
     pub avg: f64,       // time-weighted avg concurrent while engaged
     pub distract_secs: i64, // wall-clock distraction secs in the bucket
+    pub work_secs: i64,     // wall-clock work-app secs in the bucket (graph base layer)
     pub present: bool,  // false = app wasn't running this bucket (no data, not a real 0)
     pub future: bool,   // true = bucket is after "now" in the today grid (not yet)
 }
