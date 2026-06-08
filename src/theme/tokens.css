@@ -120,6 +120,8 @@
 @keyframes nn-bob   { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
 @keyframes nn-blink { 0%,93%,100% { transform: scaleY(1) } 96% { transform: scaleY(.1) } }
 @keyframes nn-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+/* current (in-progress) bucket bar: gentle breathing so "now" reads as live */
+@keyframes nn-bar-pulse { 0%,100% { opacity: .9 } 50% { opacity: .45 } }
 /* companion enter: grows from the top-right corner downward/leftward */
 @keyframes nn-from-tr { from { opacity: 0; transform: scale(0.75) translate(8px, -8px) } to { opacity: 1; transform: none } }
 
