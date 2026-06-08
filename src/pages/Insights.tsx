@@ -190,7 +190,6 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
           <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--success)', lineHeight: 0.9 }}>{claudingN}<span style={{ fontSize: 15 }}>{claudingU}</span></span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>clauding</span>
         </div>
-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)', margin: '2px 0' }} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{distractN}<span style={{ fontSize: 15 }}>{distractU}</span></span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>distracted</span>
@@ -205,15 +204,6 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
         </div>
       )}
     </Card>
-  )
-}
-
-function FocusRow({ label, value, tone, last }: { label: string; value: string; tone?: string; last?: boolean }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
-      <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{label}</span>
-      <span className="nn-num" style={{ fontSize: 14, fontWeight: 600, color: tone || 'var(--ink)' }}>{value}</span>
-    </div>
   )
 }
 
@@ -334,14 +324,24 @@ export function Insights() {
           value={range} onChange={(r) => void setRange(r)} size="sm" />
       </div>
 
-      {/* hero + key stats */}
+      {/* hero + token composition */}
       <div style={{ display: 'grid', gridTemplateColumns: TWO_UP, gap: 14, alignItems: 'stretch' }}>
         <WaterHero range={range} tokens={T} />
         <Card pad={20}>
-          <Eyebrow style={{ fontSize: 12, marginBottom: 6 }}>{rl}</Eyebrow>
-          <FocusRow label="Claude working" value={fmtSecs(insights?.claudeActiveSecs ?? 0)} tone="var(--success)" />
-          <FocusRow label="Distracted" value={fmtSecs(totalDistract)} tone="var(--warning)" />
-          <FocusRow label="Drifted" value={fmtSecs(insights?.driftSecs ?? 0)} tone="var(--critical)" last />
+          <Eyebrow style={{ fontSize: 12, marginBottom: 12 }}>Token composition · {rl}</Eyebrow>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+            <Donut segments={toks.map((t) => ({ value: t.value, color: t.color }))} label={formatCount(totalTok)} sub="tokens" size={116} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minWidth: 0 }}>
+              {toks.map((t) => (
+                <div key={t.label} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color, flexShrink: 0 }} />
+                  <span style={{ fontWeight: 500, color: 'var(--ink)', flex: 1 }}>{t.label}</span>
+                  <span className="nn-num" style={{ color: 'var(--text)', fontWeight: 600 }}>{formatCount(t.value)}</span>
+                  <span className="nn-num" style={{ color: 'var(--faint)', fontWeight: 500, width: 34, textAlign: 'right' }}>{Math.round((t.value / totalTok) * 100)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </Card>
       </div>
 
@@ -360,24 +360,6 @@ export function Insights() {
         {dist.map((d, i) => (
           <DistractionRow key={d.name} name={d.name} secs={d.secs} max={maxD} last={i === dist.length - 1} />
         ))}
-      </Card>
-
-      {/* token composition */}
-      <Card pad={20}>
-        <Eyebrow style={{ fontSize: 12, marginBottom: 12 }}>Token composition · {rl}</Eyebrow>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          <Donut segments={toks.map((t) => ({ value: t.value, color: t.color }))} label={formatCount(totalTok)} sub="tokens" size={116} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minWidth: 0 }}>
-            {toks.map((t) => (
-              <div key={t.label} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color, flexShrink: 0 }} />
-                <span style={{ fontWeight: 500, color: 'var(--ink)', flex: 1 }}>{t.label}</span>
-                <span className="nn-num" style={{ color: 'var(--text)', fontWeight: 600 }}>{formatCount(t.value)}</span>
-                <span className="nn-num" style={{ color: 'var(--faint)', fontWeight: 500, width: 34, textAlign: 'right' }}>{Math.round((t.value / totalTok) * 100)}%</span>
-              </div>
-            ))}
-          </div>
-        </div>
       </Card>
 
       {/* projects */}
