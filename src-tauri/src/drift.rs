@@ -22,9 +22,10 @@ use crate::{db, notify, settings};
 /// Full / "par" life — the daily reset level and the 100% baseline marker.
 pub const BASELINE: f64 = 100.0;
 /// Banked over-charge headroom above baseline, as a fraction of baseline.
-pub const BONUS_RATIO: f64 = 0.3;
+/// 2.0 → a great day can burst to 300% (≈3× the daily break allowance).
+pub const BONUS_RATIO: f64 = 2.0;
 /// Hard ceiling on life: baseline + banked bonus.
-pub const CAP: f64 = BASELINE * (1.0 + BONUS_RATIO); // 130.0
+pub const CAP: f64 = BASELINE * (1.0 + BONUS_RATIO); // 300.0
 /// Drop a session whose phase clock exceeds this without a `SessionEnd`. Only
 /// force-kills (SIGKILL) miss the hook; graceful Ctrl+D/Ctrl+C still fire it.
 /// The clock is frozen while idle/away, so this counts active-waiting time.
@@ -54,7 +55,7 @@ pub struct DriftRuntime {
     state: String,
     project_id: Option<String>,
     project_name: String,
-    /// `life` on the 0..CAP (130) scale. Field kept named `health` to limit churn.
+    /// `life` on the 0..CAP (300) scale. Field kept named `health` to limit churn.
     health: f64,
     last_reset_day: String,
     last_tick: Instant,
@@ -518,7 +519,7 @@ impl DriftRuntime {
             ts: chrono::Utc::now().to_rfc3339(),
             state: self.state.clone(),
             app_name: snap.app_name.clone(),
-            cloud_health: self.health, // `life` 0..CAP (130) = budget %, banked up to cap
+            cloud_health: self.health, // `life` 0..CAP (300) = budget %, banked up to cap
             baseline: BASELINE,
             cap: CAP,
             waiting_sessions,
@@ -676,7 +677,7 @@ mod tests {
 
     #[test]
     fn apply_life_clamps_at_cap() {
-        // Healing can't push life above CAP (130).
+        // Healing can't push life above CAP (300).
         let life = apply_life(CAP - 1.0, 600.0, RATIO * R, false);
         assert_eq!(life, CAP);
     }

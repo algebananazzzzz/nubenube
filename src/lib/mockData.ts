@@ -73,16 +73,15 @@ export const mockTotals: Totals = {
 // rough range scale so wider windows show plausibly larger totals in dev.
 const RANGE_MUL: Record<RangeKey, number> = { today: 1, week: 4, month: 13, all: 22 }
 
-// avg within a bucket is always below its peak (a few sessions ramp up/down),
-// so the card's "peak" (max bucket avg) stays ≥ the overall avg.
-const bucketAvg = (peak: number) => (peak > 0 ? Math.max(0.6, peak - 0.7) : 0)
+// avg within a bucket sits a little below its tier seed (a few sessions ramp
+// up/down), so the engaged-weighted mean reads naturally on the bars.
+const bucketAvg = (tier: number) => (tier > 0 ? Math.max(0.6, tier - 0.7) : 0)
 
 export const mockInsights = (range: RangeKey): Insights => {
   const sessionSeries = mockSessionSeries(range)
-  // Derive peak + avg FROM the series so they can never contradict the bars
-  // (avg is the engaged-weighted mean, always ≤ the tallest bucket avg).
+  // Derive avg FROM the series so it can never contradict the bars (the
+  // engaged-weighted mean, always ≤ the tallest bucket avg).
   const live = sessionSeries.filter((p) => p.present && p.avg > 0)
-  const peakSessions = sessionSeries.reduce((m, p) => Math.max(m, p.peak), 0)
   const avgSessions = live.length ? live.reduce((a, p) => a + p.avg, 0) / live.length : 0
   return {
     range,
@@ -98,7 +97,6 @@ export const mockInsights = (range: RangeKey): Insights => {
       { name: 'ChatGPT Atlas', secs: Math.round(9 * 60 * RANGE_MUL[range]) },
       { name: 'Telegram', secs: Math.round(5 * 60 * RANGE_MUL[range]) },
     ],
-    peakSessions,
     avgSessions,
     sessionSeries,
   }
@@ -115,14 +113,13 @@ function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
       const future = c > nowCell
       const gap = c >= nowCell - 8 && c < nowCell - 4 // a recent ~1h break
       const present = !future && c >= start && !gap
-      const peak = present ? 1 + ((c * 7) % 4) : 0
+      const tier = present ? 1 + ((c * 7) % 4) : 0
       // demo distraction: wavy stretches with gaps, 0–~85% of each 15-min (900s) cell
       const wave = (Math.sin(c / 2.5) * 0.5 + 0.5) * 540
       const distractSecs = present ? Math.round(c % 5 === 0 ? 0 : wave + (c % 9 === 0 ? 240 : 0)) : 0
       return {
         label: `${String(Math.floor((c * 15) / 60)).padStart(2, '0')}:${String((c * 15) % 60).padStart(2, '0')}`,
-        peak,
-        avg: bucketAvg(peak),
+        avg: bucketAvg(tier),
         distractSecs,
         workSecs: present ? Math.round((Math.sin(c / 3) * 0.5 + 0.5) * 600) : 0, // 0..600 of a 900s cell
         present,
@@ -144,9 +141,9 @@ function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
         const future = day > wd || (day === wd && h0 > now.getHours())
         const present = !future && h0 >= 6 && h0 <= 20
         const inWin = h0 >= 8 && h0 <= 18
-        const peak = present && inWin ? 1 + ((day * 12 + b) % 4) : 0
+        const tier = present && inWin ? 1 + ((day * 12 + b) % 4) : 0
         const distractSecs = present ? Math.round((Math.sin((day * 12 + b) / 2.2) * 0.5 + 0.5) * 3600 + (b % 6 === 0 ? 1200 : 0)) : 0
-        return { label, peak, avg: bucketAvg(peak), distractSecs, workSecs: present ? Math.round((Math.sin((day * 12 + b) / 2) * 0.5 + 0.5) * 4200) : 0, present, future }
+        return { label, avg: bucketAvg(tier), distractSecs, workSecs: present ? Math.round((Math.sin((day * 12 + b) / 2) * 0.5 + 0.5) * 4200) : 0, present, future }
       })
     }).flat()
   }
@@ -158,12 +155,11 @@ function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
     const day = i + 1
     const future = day > todayD
     const present = !future && day % 6 !== 0 // demo gap every 6th day
-    const peak = present ? 1 + (day % 5) : 0
+    const tier = present ? 1 + (day % 5) : 0
     const distractSecs = present ? Math.round((Math.sin(day / 1.7) * 0.5 + 0.5) * 16200 + (day % 4 === 0 ? 7200 : 0)) : 0
     return {
       label: `${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-      peak,
-      avg: bucketAvg(peak),
+      avg: bucketAvg(tier),
       distractSecs,
       workSecs: present ? Math.round((Math.sin(day / 2) * 0.5 + 0.5) * 50000) : 0,
       present,
@@ -221,7 +217,7 @@ export const mockFocusTick: FocusTick = {
   appName: 'Claude',
   cloudHealth: 113,
   baseline: 100,
-  cap: 130,
+  cap: 300,
   waitingSessions: 0,
   runningSessions: 1,
   budgetTotalSecs: 30 * 60,

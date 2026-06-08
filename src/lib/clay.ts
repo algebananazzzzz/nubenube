@@ -43,10 +43,16 @@ export function sessionTier(total: number): SessionTier {
   return { hue: 40, satScale: 1.2, glow: true, name: 'blaze' } // 4+
 }
 
-// desaturate + lighten as life falls below baseline
-export function moodDrain(life: number): { satMul: number; ltAdd: number } {
-  if (life >= 100) return { satMul: 1, ltAdd: 0 }
-  const t = Math.max(0, Math.min(1, (100 - life) / 100))
+// Clay vitality scaled by life: below baseline it washes out (desaturate +
+// lighten); above baseline it enriches (saturate + slightly deepen) in
+// proportion to how far you've banked toward `cap`, so the creature visibly
+// flourishes the more break you've earned.
+export function lifeTint(life: number, baseline = 100, cap = 130): { satMul: number; ltAdd: number } {
+  if (life >= baseline) {
+    const over = cap > baseline ? Math.min(1, (life - baseline) / (cap - baseline)) : 0
+    return { satMul: 1 + 0.3 * over, ltAdd: -3 * over }
+  }
+  const t = Math.min(1, (baseline - life) / baseline)
   return { satMul: 1 - 0.4 * t, ltAdd: 3 * t }
 }
 

@@ -5,21 +5,25 @@ import { useFocus } from '../store/focus'
 import { usePrefs, type Theme } from '../store/prefs'
 import { useSettings } from '../store/settings'
 import { useBudgetClock, useCountUp } from './useCountdown'
-import { hueClay, moodDrain, sessionTier, type Clay } from './clay'
+import { hueClay, lifeTint, sessionTier, type Clay } from './clay'
 import type { FocusState, FocusTick } from '../types'
 
 const NO_WORK_APPS: string[] = [] // stable ref so an unloaded settings store doesn't churn renders
 
 export const BASELINE = 100
-export const CAP = 130
+export const CAP = 300
 
 export type Mood = 'thriving' | 'content' | 'alert' | 'worried' | 'gasping' | 'fading' | 'faint'
 export type Sky = 'good' | 'working' | 'alert' | 'worried' | 'danger' | 'calm' | 'idle' | 'fading' | 'faint'
 
-// mood is a function of life only (not the clock)
+// mood is a function of life only (not the clock). Above baseline it tracks the
+// banked fraction toward `cap` (not an absolute point), so the top "thriving"
+// face scales with whatever the cap is — reached once you're in the top half of
+// the burst range (≥200% at the default 300 cap).
 export function deriveMood(life: number, cap = CAP): Mood {
-  if (life >= 0.95 * cap) return 'thriving'
-  if (life >= 100) return 'content'
+  const over = cap > BASELINE ? (life - BASELINE) / (cap - BASELINE) : 0
+  if (over >= 0.5) return 'thriving'
+  if (life >= BASELINE) return 'content'
   if (life >= 80) return 'alert'
   if (life >= 55) return 'worried'
   if (life >= 30) return 'gasping'
@@ -135,7 +139,7 @@ export function useNube(): NubeState {
   const tier = sessionTier(run + wait)
 
   // Budget = life viewed in minutes: budgetLeft = (life/baseline)·budgetTotal,
-  // banked above 100% up to the 130% cap. The shown life snaps to each backend
+  // banked above 100% up to the 300% cap. The shown life snaps to each backend
   // tick (no countdown animation); the budget timer interpolates between ticks
   // from the signed backend rate so "Xm left" ticks down smoothly.
   const life = rawLife
@@ -148,7 +152,7 @@ export function useNube(): NubeState {
   // 0 until a fresh backend reports budgetTotalSecs — don't read that as spent).
   const fainting = life <= 0
 
-  const { satMul, ltAdd } = moodDrain(life)
+  const { satMul, ltAdd } = lifeTint(life, baseline, cap)
   const clay = hueClay(tier.hue, satMul * tier.satScale, ltAdd)
   const mood = deriveMood(life, cap)
   const sky = deriveSky(life, effState)
