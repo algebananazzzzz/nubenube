@@ -189,7 +189,7 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>peak</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', lineHeight: 0.9 }}>{claudingN}<span style={{ fontSize: 15 }}>{claudingU}</span></span>
+          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: hueSwatch(40, dark), lineHeight: 0.9 }}>{claudingN}<span style={{ fontSize: 15 }}>{claudingU}</span></span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>clauding</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
