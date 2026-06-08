@@ -51,11 +51,11 @@ function ClassSwitch({ value, onChange }: { value: AppClassKey; onChange: (v: Ap
   const CELL = 28, H = 18, PAD = 3
   const idx = Math.max(0, CLASS_ORDER.findIndex((c) => c.key === value))
   return (
-    <div style={{ position: 'relative', display: 'inline-flex', padding: PAD, background: 'var(--surface-strong)', borderRadius: 'var(--r-pill)', flexShrink: 0 }}>
+    <div style={{ position: 'relative', display: 'inline-flex', padding: PAD, background: 'var(--surface-strong)', borderRadius: 'var(--r-md)', flexShrink: 0 }}>
       {/* sliding thumb — the only colored element; takes the active state's tone */}
       <div aria-hidden style={{
         position: 'absolute', top: PAD, left: PAD + idx * CELL, width: CELL, height: H,
-        borderRadius: 'var(--r-pill)', background: CLASS_ORDER[idx].tone, boxShadow: 'var(--shadow-sm)',
+        borderRadius: 'var(--r-sm)', background: CLASS_ORDER[idx].tone, boxShadow: 'var(--shadow-sm)',
         transition: 'left .2s var(--ease), background .2s var(--ease)',
       }} />
       {CLASS_ORDER.map(({ key, title }) => (
