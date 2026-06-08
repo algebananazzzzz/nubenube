@@ -77,26 +77,29 @@ function tierColor(n: number, dark: boolean): string {
 }
 
 // SVG diverging time-graph: concurrency avg bars rise above a center line,
-// distraction share (distractSecs / bucketSecs) hangs below. The two halves use
-// SEPARATE scales: sessions scale to their peak over a taller top region;
-// distraction is a fixed 0–1 share over a shorter bottom region (a fully-
-// distracted bucket fills it). The in-progress bucket's session bar breathes.
-// bucketSecs = wall-clock seconds one bar spans (today 15-min, week 2-hour, day).
+// distraction share (distractSecs / bucketSecs) hangs below — both on ONE shared
+// scale where 1.0 distraction share == one concurrent session, so a 1× bucket is
+// exactly a 1-session bar tall. Height is split by the data (peak sessions up /
+// peak distraction down), so the top region is taller whenever concurrency > 1.
+// The in-progress session bar breathes. bucketSecs = seconds one bar spans.
 function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[]; dark: boolean; avg: number; bucketSecs: number }) {
   const W = 600, H = 184, padL = 10, padR = 10, padT = 14, padB = 24
   const innerW = W - padL - padR, innerH = H - padT - padB
-  const centerY = padT + innerH * 0.62 // top (sessions) gets more height than the bottom (distraction)
-  const baseY = padT + innerH
-  const topH = centerY - padT, botH = baseY - centerY
   const n = series.length
-  const maxBar = Math.max(0.001, ...series.map((p) => p.avg))
   const fracOf = (p: SessionPoint) => (p.present && bucketSecs > 0 ? Math.min(1, (p.distractSecs ?? 0) / bucketSecs) : 0)
+  const maxBar = Math.max(0.001, ...series.map((p) => p.avg))
+  const maxFrac = Math.max(0, ...series.map(fracOf)) // 0..1
+  const pps = innerH / (maxBar + Math.max(maxFrac, 0.0001)) // shared pixels-per-unit
+  const topH = maxBar * pps
+  const botH = innerH - topH
+  const centerY = padT + topH
+  const baseY = padT + innerH
   const cellW = innerW / n
   const gap = Math.min(cellW * 0.3, 3)
   const barW = Math.max(1, cellW - gap)
   const left = (i: number) => padL + i * cellW + gap / 2
   const sessColor = tierColor(maxBar, dark)
-  const avgY = centerY - Math.min(topH, (avg / maxBar) * topH)
+  const avgY = centerY - Math.min(topH, avg * pps)
   const firstFuture = series.findIndex((p) => p.future)
   // the in-progress bucket: cell just before the future track (or the last cell
   // when nothing is future). Its bar pulses so "now" reads as live.
@@ -135,8 +138,8 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
         if (!p.present) {
           return <line key={i} x1={left(i)} y1={centerY} x2={left(i) + barW} y2={centerY} stroke="var(--faint)" strokeWidth={2} strokeDasharray="2 3" opacity={0.4} />
         }
-        const sh = Math.min(topH, (p.avg / maxBar) * topH)
-        const dh = Math.min(botH, fracOf(p) * botH)
+        const sh = Math.min(topH, p.avg * pps)
+        const dh = Math.min(botH, fracOf(p) * pps)
         return (
           <g key={i}>
             {p.avg > 0 && <rect x={left(i)} y={centerY - sh} width={barW} height={sh} rx={Math.min(2, barW / 2)} fill={sessColor} opacity={0.9}
