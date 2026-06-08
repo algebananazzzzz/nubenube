@@ -52,9 +52,11 @@ function HeroCockpit() {
           <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: lifeTone, lineHeight: .9 }}>{Math.round(s.life)}</span>
           <span className="nn-num" style={{ fontSize: 18, fontWeight: 600, color: 'var(--faint)' }}>%</span>
           <span style={{ flex: 1 }} />
-          <span className="nn-num" style={{ fontSize: 14, fontWeight: 600, color: s.fainting ? 'var(--critical)' : 'var(--faint)' }}>
-            {s.fainting ? 'budget spent' : `${s.fmtClock(s.budgetLeft)} left`}
-          </span>
+          {s.budgetTotal > 0 && (
+            <span className="nn-num" style={{ fontSize: 14, fontWeight: 600, color: s.fainting ? 'var(--critical)' : 'var(--faint)' }}>
+              {s.fainting ? 'budget spent' : `${s.fmtClock(s.budgetLeft)} left`}
+            </span>
+          )}
         </div>
         <div style={{ marginTop: 12 }}><LifeBar life={s.life} baseline={s.baseline} cap={s.cap} height={10} /></div>
 

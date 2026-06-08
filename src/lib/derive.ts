@@ -141,7 +141,9 @@ export function useNube(): NubeState {
   const ratePerMin = tick.budgetRatePerMin ?? 0
   const budgetAnchor = baseline > 0 ? (life / baseline) * budgetTotal : 0
   const budgetLeft = useBudgetClock(budgetAnchor, frozen ? 0 : ratePerMin / 60)
-  const fainting = budgetLeft <= 0
+  // fainting tracks the authoritative life meter, not the budget scale (which is
+  // 0 until a fresh backend reports budgetTotalSecs — don't read that as spent).
+  const fainting = life <= 0
 
   const { satMul, ltAdd } = moodDrain(life)
   const clay = hueClay(tier.hue, satMul * tier.satScale, ltAdd)

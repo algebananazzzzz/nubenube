@@ -83,7 +83,7 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
   const topH = centerY - padT, botH = baseY - centerY
   const n = series.length
   const maxBar = Math.max(0.001, ...series.map((p) => p.avg))
-  const fracOf = (p: SessionPoint) => (p.present && bucketSecs > 0 ? Math.min(1, p.distractSecs / bucketSecs) : 0)
+  const fracOf = (p: SessionPoint) => (p.present && bucketSecs > 0 ? Math.min(1, (p.distractSecs ?? 0) / bucketSecs) : 0)
   const maxFrac = Math.max(0.001, ...series.map(fracOf))
   const cellW = innerW / n
   const gap = Math.min(cellW * 0.3, 3)
@@ -150,7 +150,7 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
       {/* per-bucket hover targets */}
       {series.map((p, i) => (
         <rect key={`h${i}`} x={padL + i * cellW} y={padT} width={cellW} height={innerH} fill="transparent">
-          <title>{p.future ? `${p.label} · upcoming` : p.present ? `${p.label} · avg ${p.avg.toFixed(1)} sessions · ${fmtSecs(p.distractSecs)} distracted (${Math.round(fracOf(p) * 100)}%)` : `${p.label} · no data`}</title>
+          <title>{p.future ? `${p.label} · upcoming` : p.present ? `${p.label} · avg ${p.avg.toFixed(1)} sessions · ${fmtSecs(p.distractSecs ?? 0)} distracted (${Math.round(fracOf(p) * 100)}%)` : `${p.label} · no data`}</title>
         </rect>
       ))}
     </svg>
