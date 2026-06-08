@@ -26,7 +26,7 @@ export function Card({ children, style, pad = 20, soft, onClick, hoverable }: {
   )
 }
 
-type Tone = 'neutral' | 'soft' | 'accent' | 'ghost' | 'mint' | 'amber' | 'danger'
+type Tone = 'neutral' | 'soft' | 'accent' | 'ghost' | 'mint' | 'amber' | 'danger' | 'work'
 
 // `tone` overrides `kind`; both index the same palette map.
 export function Pill({ children, kind = 'neutral', tone, style }: {
@@ -40,6 +40,7 @@ export function Pill({ children, kind = 'neutral', tone, style }: {
     mint: { bg: 'var(--success-surface)', fg: 'var(--success)', bd: 'var(--success-border)' },
     amber: { bg: 'var(--warning-surface)', fg: 'var(--warning)', bd: 'var(--warning-border)' },
     danger: { bg: 'var(--critical-surface)', fg: 'var(--critical)', bd: 'var(--critical-border)' },
+    work: { bg: 'var(--work-surface)', fg: 'var(--work)', bd: 'var(--work-border)' },
   }
   const t = tones[tone || kind] || tones.neutral
   return (
@@ -160,9 +161,8 @@ export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) =
   )
 }
 
-// Segmented control; tabs are bare strings or {key,label} pairs.
 export function SegTabs<T extends string>({ tabs, value, onChange, size = 'md' }: {
-  tabs: ({ key: T; label: string } | T)[]; value: T; onChange: (v: T) => void; size?: 'sm' | 'md'
+  tabs: ({ key: T; label: string; tone?: string } | T)[]; value: T; onChange: (v: T) => void; size?: 'sm' | 'md'
 }) {
   const py = size === 'sm' ? 5 : 7, fs = size === 'sm' ? 12.5 : 13
   return (
@@ -170,11 +170,15 @@ export function SegTabs<T extends string>({ tabs, value, onChange, size = 'md' }
       {tabs.map((t) => {
         const k = (typeof t === 'string' ? t : t.key) as T
         const label = typeof t === 'string' ? t : t.label
+        const tone = typeof t === 'string' ? undefined : t.tone // token base, e.g. 'critical' | 'work'
         const act = k === value
+        const tinted = act && tone
         return (
           <button key={k} onClick={() => onChange(k)} className="nn-ui" style={{
-            padding: `${py}px 13px`, fontSize: fs, fontWeight: 600, borderRadius: 'var(--r-sm)', border: act ? '1px solid var(--line)' : '1px solid transparent', cursor: 'pointer',
-            background: act ? 'var(--surface)' : 'transparent', color: act ? 'var(--ink)' : 'var(--faint)',
+            padding: `${py}px 13px`, fontSize: fs, fontWeight: 600, borderRadius: 'var(--r-sm)',
+            border: act ? `1px solid ${tinted ? `var(--${tone}-border)` : 'var(--line)'}` : '1px solid transparent', cursor: 'pointer',
+            background: act ? (tinted ? `var(--${tone}-surface)` : 'var(--surface)') : 'transparent',
+            color: act ? (tinted ? `var(--${tone})` : 'var(--ink)') : 'var(--faint)',
             boxShadow: act ? 'var(--shadow-sm)' : 'none', transition: 'all .15s var(--ease)', whiteSpace: 'nowrap',
           }}>{label}</button>
         )
