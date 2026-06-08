@@ -44,6 +44,7 @@ pub struct SessionPoint {
     pub label: String,  // bucket label: "HH:MM" (today, 15-min) or "MM-DD" (daily)
     pub peak: i64,      // max concurrent (running+waiting) in the bucket
     pub avg: f64,       // time-weighted avg concurrent while engaged
+    pub distract_secs: i64, // wall-clock distraction secs in the bucket
     pub present: bool,  // false = app wasn't running this bucket (no data, not a real 0)
     pub future: bool,   // true = bucket is after "now" in the today grid (not yet)
 }

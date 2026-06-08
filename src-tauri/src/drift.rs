@@ -448,6 +448,9 @@ impl DriftRuntime {
                 // gap for slots it wasn't, instead of a misleading zero.
                 let slot = (now_local.hour() as i64 * 60 + now_local.minute() as i64) / 5;
                 db::mark_session_slot(&tx, &today, slot);
+                if distract_delta > 0 {
+                    db::add_distract_sample(&tx, &today, slot, distract_delta);
+                }
                 if !frozen {
                     let total_sessions = running_count + waiting_total;
                     if total_sessions > 0 {

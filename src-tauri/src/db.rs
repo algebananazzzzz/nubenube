@@ -18,7 +18,7 @@ use crate::water;
 
 /// Bump when the schema (tables/indexes/backfills below) changes so the one-shot
 /// migration re-runs. Stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 9;
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
@@ -77,16 +77,6 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             value TEXT NOT NULL
         );
 
-        -- per project-day focus secs: claude_active (working), waiting (Claude
-        -- idle, waiting on you), drift (distraction while a turn waits).
-        CREATE TABLE IF NOT EXISTS drift_daily (
-            project_id          TEXT NOT NULL,
-            local_day           TEXT NOT NULL,
-            claude_active_secs  INTEGER NOT NULL DEFAULT 0,
-            drift_secs          INTEGER NOT NULL DEFAULT 0,
-            waiting_secs        INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (project_id, local_day)
-        );
         -- single global row (project_id = GLOBAL_ID) holds the Nube's life; any
         -- legacy per-project rows are left untouched and unread.
         CREATE TABLE IF NOT EXISTS biome_state (
@@ -121,7 +111,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         -- compact_stale so the fine table stays bounded. Both share the mergeable
         -- shape: peak = MAX(running+waiting); session_secs = Σ(running+waiting)·dt;
         -- engaged_secs = Σ dt while >0 (avg = session_secs / engaged_secs). Keyed
-        -- by calendar day to match the drift_daily range filter.
+        -- by calendar day to match the day_stats range filter.
         DROP TABLE IF EXISTS session_stats;
         CREATE TABLE IF NOT EXISTS session_hourly (
             local_day    TEXT NOT NULL,
@@ -129,6 +119,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             peak         INTEGER NOT NULL DEFAULT 0,
             session_secs INTEGER NOT NULL DEFAULT 0,
             engaged_secs INTEGER NOT NULL DEFAULT 0,
+            distract_secs INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (local_day, local_hour)
         );
         CREATE TABLE IF NOT EXISTS session_recent (
@@ -137,15 +128,12 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             peak         INTEGER NOT NULL DEFAULT 0,
             session_secs INTEGER NOT NULL DEFAULT 0,
             engaged_secs INTEGER NOT NULL DEFAULT 0,
+            distract_secs INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (local_day, slot)
         );
         "#,
     )?;
     // best-effort column adds for pre-existing DBs (harmless if already present).
-    let _ = conn.execute(
-        "ALTER TABLE drift_daily ADD COLUMN waiting_secs INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
     let _ = conn.execute(
         "ALTER TABLE day_stats ADD COLUMN work_secs INTEGER NOT NULL DEFAULT 0",
         [],
@@ -165,8 +153,12 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     );
     // v5: drop now-unused columns (SQLite ≥3.35; best-effort — absent on fresh DBs).
     let _ = conn.execute("ALTER TABLE messages_seen DROP COLUMN local_month", []);
-    let _ = conn.execute("ALTER TABLE drift_daily DROP COLUMN idle_secs", []);
     let _ = conn.execute("ALTER TABLE biome_state DROP COLUMN mood", []);
+    // v8: per-project per-day focus is no longer read (Insights moved to day_stats).
+    let _ = conn.execute("DROP TABLE IF EXISTS drift_daily", []);
+    // v9: per-bucket distraction seconds, overlaid on the concurrency graph.
+    let _ = conn.execute("ALTER TABLE session_recent ADD COLUMN distract_secs INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE session_hourly ADD COLUMN distract_secs INTEGER NOT NULL DEFAULT 0", []);
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }
@@ -316,6 +308,20 @@ pub fn mark_session_slot(conn: &Connection, day: &str, slot: i64) {
     );
 }
 
+/// Accumulate distraction wall-clock seconds into the live day's 5-min slot. The
+/// slot row already exists (mark_session_slot runs each tick the app is on), but
+/// upsert anyway. Touches only distract_secs — never the concurrency metrics.
+pub fn add_distract_sample(conn: &Connection, day: &str, slot: i64, secs: i64) {
+    if secs <= 0 {
+        return;
+    }
+    let _ = conn.execute(
+        "INSERT INTO session_recent(local_day,slot,distract_secs) VALUES(?1,?2,?3)
+         ON CONFLICT(local_day,slot) DO UPDATE SET distract_secs = distract_secs + ?3",
+        params![day, slot, secs],
+    );
+}
+
 /// Fold every day older than `today` out of session_recent into session_hourly
 /// (12 five-min slots → 1 hour), then drop its fine rows. The bucket is a
 /// mergeable aggregate so the fold is exact; insert+delete share one transaction
@@ -338,13 +344,14 @@ pub fn compact_stale(conn: &mut Connection, today: &str) {
     if let Ok(tx) = conn.transaction() {
         for day in &stale {
             let _ = tx.execute(
-                "INSERT INTO session_hourly(local_day,local_hour,peak,session_secs,engaged_secs)
-                    SELECT local_day, slot/12, MAX(peak), SUM(session_secs), SUM(engaged_secs)
+                "INSERT INTO session_hourly(local_day,local_hour,peak,session_secs,engaged_secs,distract_secs)
+                    SELECT local_day, slot/12, MAX(peak), SUM(session_secs), SUM(engaged_secs), SUM(distract_secs)
                     FROM session_recent WHERE local_day=?1 GROUP BY slot/12
                  ON CONFLICT(local_day,local_hour) DO UPDATE SET
-                    peak         = MAX(peak, excluded.peak),
-                    session_secs = session_secs + excluded.session_secs,
-                    engaged_secs = engaged_secs + excluded.engaged_secs",
+                    peak          = MAX(peak, excluded.peak),
+                    session_secs  = session_secs + excluded.session_secs,
+                    engaged_secs  = engaged_secs + excluded.engaged_secs,
+                    distract_secs = distract_secs + excluded.distract_secs",
                 params![day],
             );
             let _ = tx.execute("DELETE FROM session_recent WHERE local_day=?1", params![day]);
@@ -353,11 +360,12 @@ pub fn compact_stale(conn: &mut Connection, today: &str) {
     }
 }
 
-fn point(label: String, peak: i64, secs: i64, eng: i64, present: bool, future: bool) -> SessionPoint {
+fn point(label: String, peak: i64, secs: i64, eng: i64, distract: i64, present: bool, future: bool) -> SessionPoint {
     SessionPoint {
         label,
         peak,
         avg: if eng > 0 { secs as f64 / eng as f64 } else { 0.0 },
+        distract_secs: distract,
         present,
         future,
     }
@@ -366,24 +374,24 @@ fn point(label: String, peak: i64, secs: i64, eng: i64, present: bool, future: b
 /// Build the 96×15-min "today" grid from a cell→(peak,secs,eng) map and the
 /// current 15-min cell index. Cells after `now_cell` are future; cells at/before
 /// with no data are gaps. Returns (peak, engaged-weighted avg, series). Pure.
-fn today_cells(by_cell: &HashMap<i64, (i64, i64, i64)>, now_cell: i64) -> (i64, f64, Vec<SessionPoint>) {
+fn today_cells(by_cell: &HashMap<i64, (i64, i64, i64, i64)>, now_cell: i64) -> (i64, f64, Vec<SessionPoint>) {
     let (mut peak, mut sum_secs, mut sum_eng) = (0i64, 0i64, 0i64);
     let mut series = Vec::with_capacity(96);
     for c in 0..96i64 {
         let (h, m) = ((c * 15) / 60, (c * 15) % 60);
         let label = format!("{h:02}:{m:02}");
         if c > now_cell {
-            series.push(point(label, 0, 0, 0, false, true));
+            series.push(point(label, 0, 0, 0, 0, false, true));
             continue;
         }
         match by_cell.get(&c).copied() {
-            Some((p, s, e)) => {
+            Some((p, s, e, d)) => {
                 peak = peak.max(p);
                 sum_secs += s;
                 sum_eng += e;
-                series.push(point(label, p, s, e, true, false));
+                series.push(point(label, p, s, e, d, true, false));
             }
-            None => series.push(point(label, 0, 0, 0, false, false)),
+            None => series.push(point(label, 0, 0, 0, 0, false, false)),
         }
     }
     let avg = if sum_eng > 0 { sum_secs as f64 / sum_eng as f64 } else { 0.0 };
@@ -397,19 +405,20 @@ pub fn session_insights(conn: &Connection, range: &str) -> (i64, f64, Vec<Sessio
     if matches!(Range::parse(range), Range::Today) {
         let day = today_str();
         // 15-min cell -> (peak, session_secs, engaged_secs), folded from 5-min slots.
-        let mut by_cell: HashMap<i64, (i64, i64, i64)> = HashMap::new();
+        let mut by_cell: HashMap<i64, (i64, i64, i64, i64)> = HashMap::new();
         if let Ok(mut st) = conn.prepare(
-            "SELECT slot, peak, session_secs, engaged_secs
+            "SELECT slot, peak, session_secs, engaged_secs, distract_secs
              FROM session_recent WHERE local_day=?1",
         ) {
             if let Ok(it) = st.query_map([&day], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?))
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?))
             }) {
-                for (slot, p, s, e) in it.flatten() {
-                    let cell = by_cell.entry(slot / 3).or_insert((0, 0, 0));
+                for (slot, p, s, e, d) in it.flatten() {
+                    let cell = by_cell.entry(slot / 3).or_insert((0, 0, 0, 0));
                     cell.0 = cell.0.max(p);
                     cell.1 += s;
                     cell.2 += e;
+                    cell.3 += d;
                 }
             }
         }
@@ -423,21 +432,21 @@ pub fn session_insights(conn: &Connection, range: &str) -> (i64, f64, Vec<Sessio
         // rolled up (slot/12) from session_recent. Both retain per-hour present/gap.
         let start = monday_of(Local::now().date_naive());
         let start_s = start.format("%Y-%m-%d").to_string();
-        let mut by: HashMap<(String, i64), (i64, i64, i64)> = HashMap::new();
+        let mut by: HashMap<(String, i64), (i64, i64, i64, i64)> = HashMap::new();
         if let Ok(mut st) = conn.prepare(
-            "SELECT day, hour, MAX(peak), COALESCE(SUM(secs),0), COALESCE(SUM(eng),0) FROM (
-                SELECT local_day day, local_hour hour, peak, session_secs secs, engaged_secs eng
+            "SELECT day, hour, MAX(peak), COALESCE(SUM(secs),0), COALESCE(SUM(eng),0), COALESCE(SUM(dist),0) FROM (
+                SELECT local_day day, local_hour hour, peak, session_secs secs, engaged_secs eng, distract_secs dist
                   FROM session_hourly WHERE local_day >= ?1
                 UNION ALL
-                SELECT local_day, slot/12, peak, session_secs, engaged_secs
+                SELECT local_day, slot/12, peak, session_secs, engaged_secs, distract_secs
                   FROM session_recent WHERE local_day >= ?1
              ) GROUP BY day, hour",
         ) {
             if let Ok(it) = st.query_map([&start_s], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?))
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?))
             }) {
-                for (d, h, p, s, e) in it.flatten() {
-                    by.insert((d, h), (p, s, e));
+                for (d, h, p, s, e, dist) in it.flatten() {
+                    by.insert((d, h), (p, s, e, dist));
                 }
             }
         }
@@ -456,15 +465,16 @@ pub fn session_insights(conn: &Connection, range: &str) -> (i64, f64, Vec<Sessio
                 // 168-hour blur. Block covers hours [2b, 2b+1].
                 let h0 = b * 2;
                 if d > today || (d == today && h0 > now_hour) {
-                    series.push(point(label.clone(), 0, 0, 0, false, true)); // future
+                    series.push(point(label.clone(), 0, 0, 0, 0, false, true)); // future
                     continue;
                 }
-                let (mut bp, mut bs, mut be, mut has) = (0i64, 0i64, 0i64, false);
+                let (mut bp, mut bs, mut be, mut bd, mut has) = (0i64, 0i64, 0i64, 0i64, false);
                 for h in [h0, h0 + 1] {
-                    if let Some((p, s, e)) = by.get(&(day_key.clone(), h)).copied() {
+                    if let Some((p, s, e, dist)) = by.get(&(day_key.clone(), h)).copied() {
                         bp = bp.max(p);
                         bs += s;
                         be += e;
+                        bd += dist;
                         has = true;
                     }
                 }
@@ -472,9 +482,9 @@ pub fn session_insights(conn: &Connection, range: &str) -> (i64, f64, Vec<Sessio
                     peak = peak.max(bp);
                     sum_secs += bs;
                     sum_eng += be;
-                    series.push(point(label.clone(), bp, bs, be, true, false));
+                    series.push(point(label.clone(), bp, bs, be, bd, true, false));
                 } else {
-                    series.push(point(label.clone(), 0, 0, 0, false, false)); // gap
+                    series.push(point(label.clone(), 0, 0, 0, 0, false, false)); // gap
                 }
             }
             d += Duration::days(1);
@@ -484,22 +494,22 @@ pub fn session_insights(conn: &Connection, range: &str) -> (i64, f64, Vec<Sessio
     }
 
     // daily resolution (month / all-time): aggregate into days, zero-fill the span.
-    let mut by_day: HashMap<String, (i64, i64, i64)> = HashMap::new();
+    let mut by_day: HashMap<String, (i64, i64, i64, i64)> = HashMap::new();
     let start = Range::parse(range).start_day();
     if let Ok(mut st) = conn.prepare(
-        "SELECT day, MAX(peak), COALESCE(SUM(secs),0), COALESCE(SUM(eng),0) FROM (
-            SELECT local_day day, peak, session_secs secs, engaged_secs eng
+        "SELECT day, MAX(peak), COALESCE(SUM(secs),0), COALESCE(SUM(eng),0), COALESCE(SUM(dist),0) FROM (
+            SELECT local_day day, peak, session_secs secs, engaged_secs eng, distract_secs dist
               FROM session_hourly WHERE local_day >= ?1
             UNION ALL
-            SELECT local_day, peak, session_secs, engaged_secs
+            SELECT local_day, peak, session_secs, engaged_secs, distract_secs
               FROM session_recent WHERE local_day >= ?1
          ) GROUP BY day",
     ) {
         if let Ok(it) = st.query_map([&start], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?))
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?))
         }) {
             for row in it.flatten() {
-                by_day.insert(row.0, (row.1, row.2, row.3));
+                by_day.insert(row.0, (row.1, row.2, row.3, row.4));
             }
         }
     }
@@ -535,16 +545,16 @@ pub fn session_insights(conn: &Connection, range: &str) -> (i64, f64, Vec<Sessio
                 let key = d.format("%Y-%m-%d").to_string();
                 let label = d.format("%m-%d").to_string();
                 if d > today {
-                    series.push(point(label, 0, 0, 0, false, true)); // future day
+                    series.push(point(label, 0, 0, 0, 0, false, true)); // future day
                 } else {
                     match by_day.get(&key).copied() {
-                        Some((p, secs, eng)) => {
+                        Some((p, secs, eng, dist)) => {
                             peak = peak.max(p);
                             sum_secs += secs;
                             sum_eng += eng;
-                            series.push(point(label, p, secs, eng, true, false));
+                            series.push(point(label, p, secs, eng, dist, true, false));
                         }
-                        None => series.push(point(label, 0, 0, 0, false, false)),
+                        None => series.push(point(label, 0, 0, 0, 0, false, false)),
                     }
                 }
                 d += Duration::days(1);
@@ -905,11 +915,16 @@ pub fn get_insights(conn: &Connection, range: &str) -> Insights {
     let start = Range::parse(range).start_day();
     let tokens = sum_tokens(conn, None, &start);
 
-    // honest range-scoped focus aggregates from drift_daily
-    let (active, idle, drift) = conn
+    // Working/distract/drift are the SAME numbers Home shows: day_stats holds the
+    // global per-day totals — work = Σ(running·dt) summed across all sessions,
+    // distract + drift = total wall-clock. (Insights just range-sums them so both
+    // screens report one measurement.)
+    // distract is the honest total (the per-app breakdown is best-effort and
+    // undercounts legacy days whose drift_by_app rows predate the total switch).
+    let (active, distract, drift) = conn
         .query_row(
-            "SELECT COALESCE(SUM(claude_active_secs),0), COALESCE(SUM(waiting_secs),0), COALESCE(SUM(drift_secs),0)
-             FROM drift_daily WHERE local_day >= ?1",
+            "SELECT COALESCE(SUM(work_secs),0), COALESCE(SUM(distract_secs),0), COALESCE(SUM(drift_secs),0)
+             FROM day_stats WHERE local_day >= ?1",
             [&start],
             |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
         )
@@ -926,7 +941,7 @@ pub fn get_insights(conn: &Connection, range: &str) -> Insights {
         range: range.to_string(),
         tokens,
         claude_active_secs: active,
-        claude_idle_secs: idle,
+        distract_secs: distract,
         drift_secs: drift,
         distraction_breakdown,
         peak_sessions,
@@ -1008,19 +1023,6 @@ pub fn save_life(conn: &Connection, life: f64, day: &str) {
     );
 }
 
-/// Add to a project's daily drift totals. All three deltas in seconds; zeros are
-/// no-ops on their column.
-pub fn add_drift(conn: &Connection, pid: &str, day: &str, active: i64, drift: i64, waiting: i64) {
-    let _ = conn.execute(
-        "INSERT INTO drift_daily(project_id,local_day,claude_active_secs,drift_secs,waiting_secs) VALUES(?1,?2,?3,?4,?5)
-         ON CONFLICT(project_id,local_day) DO UPDATE SET
-            claude_active_secs = claude_active_secs + ?3,
-            drift_secs = drift_secs + ?4,
-            waiting_secs = waiting_secs + ?5",
-        params![pid, day, active, drift, waiting],
-    );
-}
-
 /// Map a runtime cwd back to a stable project id (exact match, most recent).
 pub fn resolve_project_by_cwd(conn: &Connection, cwd: &str) -> Option<String> {
     if cwd.is_empty() {
@@ -1093,6 +1095,23 @@ mod tests {
     }
 
     #[test]
+    fn compact_folds_distraction_into_hours() {
+        let mut c = mem();
+        add_session_sample(&c, "2026-06-01", 0, 2, 60);
+        add_distract_sample(&c, "2026-06-01", 0, 30);
+        add_distract_sample(&c, "2026-06-01", 3, 45); // same hour 0 (slots 0..11)
+        compact_stale(&mut c, "2026-06-02");
+        let d: i64 = c
+            .query_row(
+                "SELECT distract_secs FROM session_hourly WHERE local_day='2026-06-01' AND local_hour=0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(d, 75);
+    }
+
+    #[test]
     fn compact_skips_today_and_is_noop_when_clean() {
         let mut c = mem();
         add_session_sample(&c, "2026-06-02", 5, 2, 60); // "today"
@@ -1110,13 +1129,14 @@ mod tests {
 
     #[test]
     fn today_grid_marks_bar_gap_future() {
-        let mut m: HashMap<i64, (i64, i64, i64)> = HashMap::new();
-        m.insert(2, (3, 120, 60)); // cell 2 has data
+        let mut m: HashMap<i64, (i64, i64, i64, i64)> = HashMap::new();
+        m.insert(2, (3, 120, 60, 30)); // cell 2: peak3 secs120 eng60 distract30
         let (peak, avg, series) = today_cells(&m, 4); // "now" = cell 4 (01:00)
         assert_eq!(series.len(), 96);
         assert_eq!(peak, 3);
         assert!((avg - 2.0).abs() < 1e-9); // 120/60
         assert!(series[2].present && !series[2].future); // bar
+        assert_eq!(series[2].distract_secs, 30);
         assert!(!series[1].present && !series[1].future); // gap (≤now, no data)
         assert!(series[5].future && !series[5].present); // > now
         assert_eq!(series[0].label, "00:00");
