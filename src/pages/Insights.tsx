@@ -27,6 +27,13 @@ function fmtSecs(s: number): string {
   return s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`
 }
 
+// split a short duration ("185m" / "30s") into [number, unit] so the unit can be
+// rendered smaller than the headline number.
+function durParts(secs: number): [string, string] {
+  const t = fmtSecs(secs)
+  return [t.slice(0, -1), t.slice(-1)]
+}
+
 // read tokens 0.0002 mL each, output 0.0015 mL — mirrors src-tauri/src/water.rs
 function waterFromTokens(t: TokenBreakdown): number {
   const read = (t.input || 0) + (t.cacheCreate || 0) + (t.cacheRead || 0)
@@ -164,6 +171,8 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
   // (honest day_stats totals, matching Home + the breakdown card).
   const claudingSecs = insights.claudeActiveSecs ?? 0
   const distractTotal = insights.distractSecs ?? 0
+  const [claudingN, claudingU] = durParts(claudingSecs)
+  const [distractN, distractU] = durParts(distractTotal)
   // wall-clock seconds one bar spans, for the distraction-share denominator.
   const bucketSecs = range === 'today' ? 15 * 60 : range === 'week' ? 2 * 3600 : 24 * 3600
   return (
@@ -178,12 +187,12 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>peak</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--success)', lineHeight: 0.9 }}>{fmtSecs(claudingSecs)}</span>
+          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--success)', lineHeight: 0.9 }}>{claudingN}<span style={{ fontSize: 15 }}>{claudingU}</span></span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>clauding</span>
         </div>
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)', margin: '2px 0' }} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{fmtSecs(distractTotal)}</span>
+          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{distractN}<span style={{ fontSize: 15 }}>{distractU}</span></span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>distracted</span>
         </div>
       </div>
