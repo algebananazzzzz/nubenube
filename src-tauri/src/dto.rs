@@ -54,8 +54,8 @@ pub struct Insights {
     pub range: String,
     pub tokens: TokenBreakdown, // token composition for the range
     pub claude_active_secs: i64, // Claude working
-    pub claude_idle_secs: i64,   // Claude idle, waiting on you
-    pub drift_secs: i64,         // time on distractions
+    pub distract_secs: i64,      // total time on a distraction (honest; matches Home)
+    pub drift_secs: i64,         // drift (distraction while a turn waits)
     pub distraction_breakdown: Vec<DistractionSlice>,
     pub peak_sessions: i64,      // max concurrent (running+waiting) over range
     pub avg_sessions: f64,       // time-weighted avg concurrent over engaged time in the range
@@ -104,7 +104,11 @@ pub struct FocusTickDto {
     pub cap: f64,
     pub waiting_sessions: i64,
     pub running_sessions: i64,
-    pub seconds_to_death: Option<i64>,
+    /// Today's full budget in seconds (baseline level = time_to_death_min·60).
+    pub budget_total_secs: i64,
+    /// Signed budget-seconds gained per minute (negative = draining); lets the
+    /// client tick the single budget timer smoothly between backend ticks.
+    pub budget_rate_per_min: f64,
     /// Today's (reset-day) activity secs: active = states 1-4; distract = 3-4;
     /// drift = state 3 only (drifting); work = Σ running·dt; monitored = tracked time.
     pub active_secs_today: i64,
