@@ -34,14 +34,14 @@ export type RangeKey = 'today' | 'week' | 'month' | 'all'
 
 export type DistractionSlice = { name: string; secs: number }
 
-export type SessionPoint = { label: string; peak: number; avg: number; present: boolean; future: boolean }
+export type SessionPoint = { label: string; peak: number; avg: number; distractSecs: number; present: boolean; future: boolean }
 
 export type Insights = {
   range: RangeKey
   tokens: TokenBreakdown // token composition for the range
   claudeActiveSecs: number // Claude working
-  claudeIdleSecs: number // Claude idle, waiting on you
-  driftSecs: number // time on distractions
+  distractSecs: number // total time on a distraction (honest; matches Home)
+  driftSecs: number // drift (distraction while a turn waits)
   distractionBreakdown: DistractionSlice[]
   peakSessions: number // max concurrent (running+waiting) over range
   avgSessions: number // time-weighted avg concurrent over engaged time in the range
@@ -67,7 +67,8 @@ export type FocusTick = {
   cap: number // max life incl. banked bonus — always 130
   waitingSessions: number // # Claude sessions stopped-and-waiting (past grace)
   runningSessions: number // # sessions currently running (Claude working)
-  secondsToDeath?: number | null // honest net-rate countdown; only while net-draining
+  budgetTotalSecs: number // today's full budget in secs (baseline level = budget min · 60)
+  budgetRatePerMin: number // signed budget-secs gained per min (negative = draining)
   activeSecsToday: number // today's states 1+2+3+4 (engaged or on a distraction)
   distractSecsToday: number // today's states 3+4 (on a distraction)
   driftSecsToday: number // today's state 3 only (drifting — Claude waiting + distracted)
@@ -84,8 +85,9 @@ export type DayOverride = {
 
 export type Sensitivity = {
   graceSecs: number
-  timeToDeathMin: number // minutes of one waiting session on a distraction, baseline → 0
+  timeToDeathMin: number // daily distraction allowance in minutes (1× drain budget)
   healDrainRatio: number // heal-per-running ÷ drain-per-waiting (default 0.1)
+  waitingMultiplier: number // drain ×multiplier while a turn is waiting on you
   idleThresholdSecs: number
   dayOverrides: DayOverride[] // per-weekday overrides of the two rate knobs (empty = same all week)
 }
