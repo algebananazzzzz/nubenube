@@ -3,10 +3,12 @@
 
 import { useFocus } from '../store/focus'
 import { usePrefs, type Theme } from '../store/prefs'
-import { useCountdown, useCountUp } from './useCountdown'
-import { rescue } from './rescue'
-import { hueClay, moodDrain, DEFAULT_HUE, type Clay } from './clay'
+import { useSettings } from '../store/settings'
+import { useBudgetClock, useCountUp } from './useCountdown'
+import { hueClay, moodDrain, sessionTier, type Clay } from './clay'
 import type { FocusState, FocusTick } from '../types'
+
+const NO_WORK_APPS: string[] = [] // stable ref so an unloaded settings store doesn't churn renders
 
 export const BASELINE = 100
 export const CAP = 130
@@ -34,7 +36,6 @@ export function deriveSky(life: number, state: FocusState): Sky {
     case 'waiting': return 'alert'
     case 'drifting': return life < 55 ? 'danger' : 'worried'
     case 'chillin': return 'alert'
-    case 'paused': return 'calm'
     default: return 'idle'
   }
 }
@@ -69,7 +70,6 @@ export function statusFor(state: FocusState, appName: string | null): Status {
     case 'waiting': return { label: 'Waiting', tone: 'var(--accent)', pulse: true }
     case 'drifting': return { label: `Drifting · ${app}`, tone: 'var(--critical)', pulse: true }
     case 'chillin': return { label: `Chillin · ${app}`, tone: 'var(--teal)', pulse: false }
-    case 'paused': return { label: 'Paused', tone: 'var(--calm)', pulse: false }
     default: return { label: 'Idle', tone: 'var(--faint)', pulse: false }
   }
 }
@@ -78,19 +78,16 @@ export function statusFor(state: FocusState, appName: string | null): Status {
 export function cueFor(s: NubeState): { title: string; line: string } {
   const app = s.appName || 'a distraction'
   switch (s.effState) {
-    case 'paused': return { title: 'Paused', line: 'Tracking is off — nothing counts until you resume.' }
-    case 'drifting': return { title: `Drifting · ${app}`, line: `Claude is waiting while you're on ${app} — Nube is draining.` }
-    case 'chillin': return { title: `Chillin · ${app}`, line: `You're on ${app}. Nothing is waiting, so Nube is fine.` }
+    case 'drifting': return { title: `Drifting · ${app}`, line: `Claude is waiting while you're on ${app} — budget draining fast.` }
+    case 'chillin': return { title: `Chillin · ${app}`, line: `You're on ${app} — spending today's distraction budget.` }
     case 'waiting': return { title: 'Waiting', line: 'Claude finished and is waiting on you.' }
     case 'vibing': return { title: 'Vibing', line: 'Claude is working for you — Nube is banking life.' }
     default: return { title: 'Idle', line: 'No Claude sessions right now.' }
   }
 }
 
-// secondary metric caption (count/time), keyed by state
+// secondary metric caption (count), keyed by state
 export function timerFor(s: NubeState): string {
-  if (s.paused) return 'frozen'
-  if (s.effState === 'drifting') return `${fmtClock(s.secondsToDeath ?? 0)} left`
   if (s.effState === 'vibing') return `${s.run} running`
   if (s.effState === 'waiting') return `${s.wait} waiting`
   return ''
@@ -109,15 +106,13 @@ export type NubeState = {
   // live (ticking) "today" totals for the Home timers:
   work: number // session-weighted Claude-working secs (faster with more windows)
   distracted: number // seconds on a distraction
-  focused: number // present-&-tracking secs that weren't distraction (monitored − distracted)
-  paused: boolean
-  togglePause: () => void
+  workApp: number // seconds the foreground was a work app today
   mood: Mood
   sky: Sky
   clay: Clay
-  secondsToDeath: number | null
-  remaining: number | null
-  countdownPct: number
+  glow: boolean // session tier 4+ — creature gets an aura
+  budgetLeft: number // seconds of daily distraction budget remaining (smoothed)
+  budgetTotal: number // full budget in seconds (baseline level)
   fainting: boolean
   fmtClock: typeof fmtClock
   fmtCountdown: typeof fmtCountdown
@@ -131,54 +126,47 @@ export function useNube(): NubeState {
   const baseline = tick.baseline || BASELINE
   const cap = tick.cap || CAP
   const effState = tick.state
-  const paused = effState === 'paused'
   const appName = tick.appName?.trim() ? tick.appName.trim() : null
   const run = tick.runningSessions ?? 0
   const wait = tick.waitingSessions ?? 0
   const distract = tick.distractSecsToday ?? 0
-  const hue = tick.colorHue || DEFAULT_HUE
+  // Creature color is driven by concurrent sessions (running + waiting), not the
+  // project hue — more sessions warm + saturate the clay to reward fanning out.
+  const tier = sessionTier(run + wait)
 
-  // Health and the countdown are one quantity, viewed two ways. The backend sets
-  // secondsToDeath = life/|rate|, so life is linear in time-left and hits 0 exactly
-  // when the timer does. During drift we therefore drive the shown `life` from the
-  // live countdown so the % meter and the timer tick down together each second,
-  // rather than the meter lagging the backend's ~2s ticks: liveLife == rawLife at
-  // every backend anchor and falls at exactly the backend drain rate between them.
-  const secondsToDeath = tick.secondsToDeath ?? null
-  const losing = !paused && effState === 'drifting' && secondsToDeath != null
-  const remaining = useCountdown(losing ? secondsToDeath : null, losing)
-  const life = losing && secondsToDeath && remaining != null
-    ? Math.max(0, rawLife * (remaining / secondsToDeath))
-    : rawLife
-  // Bar = the same life as a fraction of full (cap) life: depletes in lock-step
-  // with the meter and reads full at the 130% cap.
-  const countdownPct = losing ? Math.max(0, Math.min(1, life / cap)) : 0
-  const fainting = remaining != null && remaining <= 0
+  // Budget = life viewed in minutes: budgetLeft = (life/baseline)·budgetTotal,
+  // banked above 100% up to the 130% cap. The shown life snaps to each backend
+  // tick (no countdown animation); the budget timer interpolates between ticks
+  // from the signed backend rate so "Xm left" ticks down smoothly.
+  const life = rawLife
+  const frozen = tick.frozen ?? false
+  const budgetTotal = tick.budgetTotalSecs ?? 0
+  const ratePerMin = tick.budgetRatePerMin ?? 0
+  const budgetAnchor = baseline > 0 ? (life / baseline) * budgetTotal : 0
+  const budgetLeft = useBudgetClock(budgetAnchor, frozen ? 0 : ratePerMin / 60)
+  // fainting tracks the authoritative life meter, not the budget scale (which is
+  // 0 until a fresh backend reports budgetTotalSecs — don't read that as spent).
+  const fainting = life <= 0
 
   const { satMul, ltAdd } = moodDrain(life)
-  const clay = hueClay(hue, satMul, ltAdd)
-  const mood: Mood = paused
-    ? (life >= 100 ? 'content' : life >= 55 ? 'worried' : 'fading')
-    : deriveMood(life, cap)
-  const sky = paused ? 'calm' : deriveSky(life, effState)
+  const clay = hueClay(tier.hue, satMul * tier.satScale, ltAdd)
+  const mood = deriveMood(life, cap)
+  const sky = deriveSky(life, effState)
 
   // Anchored to the backend totals; ticks locally each second while the state is
   // active so the Home clocks advance smoothly between ~2s backend updates.
-  const frozen = tick.frozen ?? paused
   const onDistraction = effState === 'drifting' || effState === 'chillin'
   const work = useCountUp(tick.workSecsToday ?? 0, !frozen ? run : 0) // +run/sec
   const distracted = useCountUp(distract, onDistraction ? 1 : 0)
-  const monitored = useCountUp(tick.monitoredSecsToday ?? 0, !frozen ? 1 : 0)
-  // present time that wasn't distraction; during a distraction both totals tick
-  // together so this holds, otherwise it advances with monitored.
-  const focused = Math.max(0, monitored - distracted)
+  const workApps = useSettings((st) => st.settings?.workApps) ?? NO_WORK_APPS
+  const onWorkApp = !!appName && workApps.some((w) => w.toLowerCase() === appName.toLowerCase())
+  const workApp = useCountUp(tick.workAppSecsToday ?? 0, !frozen && onWorkApp ? 1 : 0)
 
   return {
     tick, theme, life, baseline, cap, effState, appName,
-    run, wait, work, distracted, focused,
-    paused, togglePause: () => { void rescue.setPaused(!paused) },
-    mood, sky, clay,
-    secondsToDeath, remaining, countdownPct, fainting,
+    run, wait, work, distracted, workApp,
+    mood, sky, clay, glow: tier.glow,
+    budgetLeft, budgetTotal, fainting,
     fmtClock, fmtCountdown,
   }
 }

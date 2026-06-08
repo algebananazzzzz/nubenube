@@ -13,6 +13,7 @@ type UsageState = {
   loaded: boolean
   loadAll: () => Promise<void>
   setRange: (r: RangeKey) => Promise<void>
+  refreshInsights: () => Promise<void>
   rescan: () => Promise<void>
 }
 
@@ -21,7 +22,7 @@ export const useUsage = create<UsageState>((set, get) => ({
   totals: null,
   insights: null,
   connection: null,
-  range: 'week',
+  range: 'today',
   live: false,
   loading: false,
   loaded: false,
@@ -46,6 +47,12 @@ export const useUsage = create<UsageState>((set, get) => ({
   setRange: async (r) => {
     set({ range: r })
     const i = await api.getInsights(r)
+    set({ insights: i.data })
+  },
+  // Re-fetch only insights for the current range — keeps the concurrency graph
+  // live (time axis advances, current bucket fills) without a full reload flicker.
+  refreshInsights: async () => {
+    const i = await api.getInsights(get().range)
     set({ insights: i.data })
   },
   rescan: async () => {

@@ -28,3 +28,4 @@ src-tauri/target/
 
 # Superpowers working notes (specs/plans) — not part of the shipped repo
 docs/superpowers/
+.superpowers/

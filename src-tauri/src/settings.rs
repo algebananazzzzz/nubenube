@@ -5,30 +5,45 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// Per-weekday override of the two rate knobs; `weekday` is 0=Mon … 6=Sun. Days
+/// absent from the list fall back to the base `Sensitivity` values.
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DayOverride {
+    pub weekday: u8,
+    pub time_to_death_min: f64,
+    pub heal_drain_ratio: f64,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Sensitivity {
     #[serde(default = "def_grace")]
     pub grace_secs: i64,
-    /// Minutes of one-session distraction to drop life baseline→0. Anchors the
-    /// base rate `R = baseline / time_to_death_min` (drift.rs).
+    /// Daily distraction allowance in minutes — the budget that 1× distraction
+    /// spends down. Anchors the base rate `R = baseline / time_to_death_min`.
     #[serde(default = "def_time_to_death")]
     pub time_to_death_min: f64,
     /// heal-per-running ÷ drain-per-waiting. One running window heals at
     /// `ratio · R`; default 0.1 → 10 min of work offsets 1 min of distraction.
     #[serde(default = "def_heal_drain_ratio")]
     pub heal_drain_ratio: f64,
+    /// Drain multiplier while a turn is waiting on you: distraction + a waiting
+    /// turn burns budget `waiting_multiplier`× faster. Global (not per-weekday).
+    #[serde(default = "def_waiting_multiplier")]
+    pub waiting_multiplier: f64,
     #[serde(default = "def_idle")]
     pub idle_threshold_secs: i64,
-    #[serde(default = "def_granularity")]
-    pub window_granularity: String,
+    /// Per-weekday overrides of the two knobs above (empty = same rates all week).
+    #[serde(default)]
+    pub day_overrides: Vec<DayOverride>,
 }
 
 fn def_grace() -> i64 { 10 }
-fn def_time_to_death() -> f64 { 12.0 }
+fn def_time_to_death() -> f64 { 30.0 }
 fn def_heal_drain_ratio() -> f64 { 0.1 }
+fn def_waiting_multiplier() -> f64 { 3.0 }
 fn def_idle() -> i64 { 120 }
-fn def_granularity() -> String { "app".to_string() }
 
 impl Default for Sensitivity {
     fn default() -> Self {
@@ -36,24 +51,9 @@ impl Default for Sensitivity {
             grace_secs: def_grace(),
             time_to_death_min: def_time_to_death(),
             heal_drain_ratio: def_heal_drain_ratio(),
+            waiting_multiplier: def_waiting_multiplier(),
             idle_threshold_secs: def_idle(),
-            window_granularity: def_granularity(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct WaterRates {
-    pub read: f64,
-    pub write: f64,
-}
-
-impl Default for WaterRates {
-    fn default() -> Self {
-        WaterRates {
-            read: crate::water::READ_ML_PER_TOKEN,
-            write: crate::water::WRITE_ML_PER_TOKEN,
+            day_overrides: Vec::new(),
         }
     }
 }
@@ -62,11 +62,9 @@ impl Default for WaterRates {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub distraction_apps: Vec<String>,
+    pub work_apps: Vec<String>,
     pub sensitivity: Sensitivity,
-    pub reset_time_local: String,
-    pub pause_until: Option<String>,
     pub drift_moment_intensity: String,
-    pub water_rates: WaterRates,
     pub log_roots: Vec<String>,
     pub notification_sound_name: Option<String>,
     pub notification_sound_path: Option<String>,
@@ -78,20 +76,9 @@ impl Default for Settings {
             // No prefilled distractions — empty list means classify() is always
             // Neutral until the user tags an app.
             distraction_apps: Vec::new(),
-            sensitivity: Sensitivity {
-                grace_secs: 10,
-                time_to_death_min: 12.0,
-                heal_drain_ratio: 0.1,
-                idle_threshold_secs: 120,
-                window_granularity: "app".to_string(),
-            },
-            reset_time_local: "05:00".to_string(),
-            pause_until: None,
+            work_apps: Vec::new(),
+            sensitivity: Sensitivity::default(),
             drift_moment_intensity: "gentle-notification".to_string(),
-            water_rates: WaterRates {
-                read: crate::water::READ_ML_PER_TOKEN,
-                write: crate::water::WRITE_ML_PER_TOKEN,
-            },
             log_roots: crate::store_paths::log_roots()
                 .iter()
                 .map(|p| p.to_string_lossy().into_owned())
@@ -132,11 +119,32 @@ pub fn save(dir: &Path, settings: &Settings) {
     }
 }
 
-pub fn is_paused(settings: &Settings) -> bool {
-    match &settings.pause_until {
-        Some(ts) if !ts.is_empty() => chrono::DateTime::parse_from_rfc3339(ts)
-            .map(|t| t > chrono::Utc::now())
-            .unwrap_or(false),
-        _ => false,
+/// Resolved (time_to_death_min, heal_drain_ratio) for a weekday (0=Mon … 6=Sun):
+/// the matching day override if present, else the base values. Pure.
+pub fn effective_rates(s: &Sensitivity, weekday: u8) -> (f64, f64) {
+    s.day_overrides
+        .iter()
+        .find(|o| o.weekday == weekday)
+        .map(|o| (o.time_to_death_min, o.heal_drain_ratio))
+        .unwrap_or((s.time_to_death_min, s.heal_drain_ratio))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_30min_budget_and_3x() {
+        let s = Sensitivity::default();
+        assert_eq!(s.time_to_death_min, 30.0); // daily distraction budget (min)
+        assert_eq!(s.waiting_multiplier, 3.0); // X× while a turn waits
+    }
+
+    #[test]
+    fn effective_rates_prefers_override_then_base() {
+        let mut s = Sensitivity::default();
+        s.day_overrides = vec![DayOverride { weekday: 5, time_to_death_min: 60.0, heal_drain_ratio: 0.25 }];
+        assert_eq!(effective_rates(&s, 5), (60.0, 0.25)); // Saturday → override
+        assert_eq!(effective_rates(&s, 0), (s.time_to_death_min, s.heal_drain_ratio)); // Monday → base
     }
 }

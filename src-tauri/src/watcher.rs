@@ -14,6 +14,7 @@ pub struct Snapshot {
 #[derive(Clone, Copy, PartialEq)]
 pub enum AppClass {
     Distraction,
+    Work,
     Neutral,
 }
 
@@ -29,12 +30,17 @@ pub fn snapshot() -> Snapshot {
 }
 
 /// Distraction iff the active app's name exactly matches (case-insensitive) a
-/// user-curated entry. Exact identity — never substring — so "X" can't match
-/// "Xcode". Everything else is Neutral (research/editor/etc. never decays).
+/// distraction entry; else Work iff it matches a work entry; else Neutral.
+/// Exact identity — never substring. Distraction wins if an app is in both lists.
 pub fn classify(app_name: &str, settings: &Settings) -> AppClass {
     let a = app_name.trim();
-    if !a.is_empty() && settings.distraction_apps.iter().any(|d| d.trim().eq_ignore_ascii_case(a)) {
+    if a.is_empty() {
+        return AppClass::Neutral;
+    }
+    if settings.distraction_apps.iter().any(|d| d.trim().eq_ignore_ascii_case(a)) {
         AppClass::Distraction
+    } else if settings.work_apps.iter().any(|w| w.trim().eq_ignore_ascii_case(a)) {
+        AppClass::Work
     } else {
         AppClass::Neutral
     }
@@ -54,5 +60,18 @@ mod tests {
         // the old substring bug: "X" must NOT match "Xcode"
         assert!(matches!(classify("Xcode", &s), AppClass::Neutral));
         assert!(matches!(classify("", &s), AppClass::Neutral));
+    }
+
+    #[test]
+    fn work_apps_classify_as_work_distraction_wins_ties() {
+        let mut s = Settings::default();
+        s.work_apps = vec!["Visual Studio Code".into(), "Google Chrome".into()];
+        s.distraction_apps = vec!["Telegram".into(), "Google Chrome".into()];
+        assert!(matches!(classify("Visual Studio Code", &s), AppClass::Work));
+        assert!(matches!(classify("Telegram", &s), AppClass::Distraction));
+        // app in BOTH lists → distraction wins (matches classify precedence)
+        assert!(matches!(classify("Google Chrome", &s), AppClass::Distraction));
+        // unknown → neutral
+        assert!(matches!(classify("Finder", &s), AppClass::Neutral));
     }
 }

@@ -18,5 +18,4 @@ export const rescue = {
   // Size the OS companion window to the content the webview measured (logical px).
   resizeCompanion: (width: number, height: number) => safe('nube_resize_companion', { width, height }),
   openMain: () => safe('nube_open_main'),
-  setPaused: (paused: boolean) => safe('nube_set_paused', { paused }),
 }

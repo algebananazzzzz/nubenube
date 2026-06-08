@@ -74,4 +74,6 @@ async function subscribe<T>(event: string, cb: (payload: T) => void): Promise<Un
 
 export const events = {
   onFocusTick: (cb: (t: FocusTick) => void) => subscribe<FocusTick>('focus-tick', cb),
+  // connector emits this with the new running token total when logs change
+  onUsageUpdated: (cb: (total: number) => void) => subscribe<number>('usage-updated', cb),
 }

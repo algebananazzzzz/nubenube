@@ -28,6 +28,18 @@ printf '{"event":"%s","ts":"%s","cwd":"%s","sessionId":"%s"}\n' "${1:-stop}" "$t
 exit 0
 "#;
 
+/// Every hook event nube installs into; the single source for install / uninstall
+/// / is-installed so they can't drift out of sync.
+const HOOK_EVENTS: &[&str] = &[
+    "SessionStart",
+    "UserPromptSubmit",
+    "Stop",
+    "SessionEnd",
+    "PreToolUse",
+    "PostToolUse",
+    "Notification",
+];
+
 pub fn claude_dir() -> PathBuf {
     if let Ok(v) = std::env::var("CLAUDE_CONFIG_DIR") {
         if let Some(first) = v.split(',').next() {
@@ -138,15 +150,7 @@ pub fn uninstall_at(dir: &Path) -> Result<()> {
     if settings_path.exists() {
         let txt = std::fs::read_to_string(&settings_path)?;
         let mut root: Value = serde_json::from_str(&txt).unwrap_or_else(|_| json!({}));
-        for ev in [
-            "SessionStart",
-            "UserPromptSubmit",
-            "Stop",
-            "SessionEnd",
-            "PreToolUse",
-            "PostToolUse",
-            "Notification",
-        ] {
+        for &ev in HOOK_EVENTS {
             if let Some(arr) = root
                 .get_mut("hooks")
                 .and_then(|h| h.get_mut(ev))
@@ -174,17 +178,7 @@ pub fn is_installed_at(dir: &Path) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    [
-        "SessionStart",
-        "UserPromptSubmit",
-        "Stop",
-        "SessionEnd",
-        "PreToolUse",
-        "PostToolUse",
-        "Notification",
-    ]
-    .iter()
-    .all(|ev| {
+    HOOK_EVENTS.iter().all(|ev| {
         root.get("hooks")
             .and_then(|h| h.get(*ev))
             .and_then(|a| a.as_array())

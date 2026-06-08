@@ -39,8 +39,3 @@ pub fn drift(app: &AppHandle, app_name: &str, project: &str, sound_name: Option<
         let _ = app.emit("play-notification-sound", path);
     }
 }
-
-#[allow(dead_code)]
-pub fn simple(app: &AppHandle, title: &str, body: &str) {
-    let _ = app.notification().builder().title(title).body(body).show();
-}

@@ -49,11 +49,11 @@ function NavItem({ item }: { item: NavDef }) {
   )
 }
 
-// sidebar status chip: life % + state label or drift countdown; links Home
+// sidebar status chip: life % + state label, or budget-left while on a distraction; links Home
 function HomeBloop() {
   const s = useNube()
   const st = statusFor(s.effState, s.appName)
-  const drift = s.remaining != null
+  const drift = s.effState === 'drifting' || s.effState === 'chillin'
   const cdTone = s.life < 30 ? 'var(--critical)' : 'var(--warning)'
   return (
     <NavLink to="/" end style={{ textDecoration: 'none' }}>
@@ -62,7 +62,7 @@ function HomeBloop() {
         borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface)', textAlign: 'left',
       }}>
         <div style={{ width: 38, height: 38, borderRadius: 'var(--r-sm)', overflow: 'hidden', flexShrink: 0, border: '1px solid var(--line-faint)', background: 'var(--surface-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Nube mood={s.mood} size={36} />
+          <Nube mood={s.mood} size={36} glow={s.glow} />
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
@@ -72,7 +72,7 @@ function HomeBloop() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4 }}>
             <Dot tone={drift ? cdTone : st.tone} size={6} pulse={st.pulse} />
             <span className={drift ? 'nn-num' : undefined} style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: drift ? cdTone : 'var(--faint)', fontWeight: drift ? 600 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {drift ? `${s.fmtCountdown(s.remaining ?? 0)} left` : st.label}
+              {drift ? `${s.fmtClock(s.budgetLeft)} left` : st.label}
             </span>
           </div>
         </div>

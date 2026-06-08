@@ -73,7 +73,7 @@ function Face({ mood, B }: { mood: Mood; B: number }) {
   )
 }
 
-export function Nube({ mood, size = 200 }: { mood: Mood; size?: number }) {
+export function Nube({ mood, size = 200, glow = false }: { mood: Mood; size?: number; glow?: boolean }) {
   const s = size
   const B = s * 0.84
   const low = mood === 'fading' || mood === 'faint'
@@ -88,6 +88,14 @@ export function Nube({ mood, size = 200 }: { mood: Mood; size?: number }) {
       <div style={{ position: 'absolute', left: '50%', bottom: s * 0.02, width: s * 0.5, height: s * 0.06, transform: 'translateX(-50%)', borderRadius: '50%', background: 'rgba(0,0,0,.10)', filter: 'blur(4px)' }} />
 
       <div style={{ position: 'absolute', inset: 0, animation: float, opacity: bodyOpacity, transition: 'opacity .7s' }}>
+        {glow && !low && (
+          <div style={{
+            position: 'absolute', left: '50%', top: s * 0.1 + B / 2, width: B * 1.2, height: B * 1.2,
+            transform: 'translate(-50%,-50%)', borderRadius: '50%', background: 'var(--clay-mid)',
+            filter: `blur(${s * 0.08}px)`, opacity: 0.55, animation: 'nn-pulse 2.6s var(--ease) infinite',
+            pointerEvents: 'none',
+          }} />
+        )}
         <div style={{ ...foot, left: s * 0.3, transform: 'rotate(-10deg)' }} />
         <div style={{ ...foot, right: s * 0.3, transform: 'rotate(10deg)' }} />
 

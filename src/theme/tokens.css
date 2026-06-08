@@ -35,6 +35,7 @@
   --success:        #008a22; --success-surface: #f2fbf6; --success-border: #cceeda;
   --warning:        #bb5a00; --warning-surface: #fff9e8; --warning-border: #fbeabf;
   --critical:       #e52228; --critical-on: #c00005; --critical-surface: #fff5f5; --critical-border: #fbd4d4;
+  --work:           #4f46e5; --work-surface: #eef2ff; --work-border: #c7d2fe;
 
   /* focus state colors */
   --teal: #0d9488;   /* chillin — relaxed, off-task but nothing blocked */
@@ -79,6 +80,7 @@
   --success:        #4ec77a; --success-surface: rgba(0,138,34,.15);  --success-border: rgba(78,199,122,.34);
   --warning:        #e0922e; --warning-surface: rgba(187,90,0,.18);  --warning-border: rgba(224,146,46,.34);
   --critical:       #f4716f; --critical-on: #f78b89; --critical-surface: rgba(229,34,40,.16); --critical-border: rgba(244,113,111,.34);
+  --work:           #818cf8; --work-surface: rgba(79,70,229,.16); --work-border: rgba(129,140,248,.36);
 
   --teal: #2dd4bf;
   --calm: #6668a8;
@@ -120,6 +122,8 @@
 @keyframes nn-bob   { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
 @keyframes nn-blink { 0%,93%,100% { transform: scaleY(1) } 96% { transform: scaleY(.1) } }
 @keyframes nn-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+/* current (in-progress) bucket bar: gentle breathing so "now" reads as live */
+@keyframes nn-bar-pulse { 0%,100% { opacity: .9 } 50% { opacity: .45 } }
 /* companion enter: grows from the top-right corner downward/leftward */
 @keyframes nn-from-tr { from { opacity: 0; transform: scale(0.75) translate(8px, -8px) } to { opacity: 1; transform: none } }
 
