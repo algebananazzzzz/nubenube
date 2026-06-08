@@ -15,6 +15,20 @@ export function useCountdown(target: number | null, active: boolean): number | n
   return shown
 }
 
+// Smooth budget timer: re-anchors to the backend `target` (budget secs left) on
+// each ~2s update, then drifts by `ratePerSec` (signed; negative = draining)
+// every second so the single budget timer moves between ticks. Clamped at ≥0.
+export function useBudgetClock(target: number, ratePerSec: number): number {
+  const [shown, setShown] = useState(target)
+  useEffect(() => { setShown(target) }, [target])
+  useEffect(() => {
+    if (ratePerSec === 0) return
+    const id = setInterval(() => setShown((s) => Math.max(0, s + ratePerSec)), 1000)
+    return () => clearInterval(id)
+  }, [ratePerSec])
+  return shown
+}
+
 // Smooth count-UP for the live Home timers. Re-anchors to the backend total
 // (`base`) whenever it updates (~2s), and between updates adds `perSecond` each
 // second so the clock ticks smoothly. `perSecond` may be >1 (the work timer adds
