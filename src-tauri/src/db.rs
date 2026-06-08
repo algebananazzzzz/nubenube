@@ -18,7 +18,7 @@ use crate::water;
 
 /// Bump when the schema (tables/indexes/backfills below) changes so the one-shot
 /// migration re-runs. Stored in `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
@@ -1102,6 +1102,33 @@ mod tests {
         let c = Connection::open_in_memory().unwrap();
         migrate(&c).unwrap();
         c
+    }
+
+    // Regression: a pre-work-apps DB already stamped at user_version=9 must still
+    // receive the v10 columns on the next open. If SCHEMA_VERSION isn't bumped,
+    // migrate() returns early, the ALTERs never run, and every read of
+    // work_app_secs / work_secs errors → the app shows zeroed/empty data, which
+    // looks like "all my data is lost" even though nothing was deleted.
+    #[test]
+    fn migrate_adds_workapp_columns_to_an_existing_v9_db() {
+        let c = Connection::open_in_memory().unwrap();
+        // an old DB: data tables WITHOUT the new columns, holding real data.
+        c.execute_batch(
+            "CREATE TABLE day_stats(local_day TEXT PRIMARY KEY, active_secs INTEGER NOT NULL DEFAULT 0, distract_secs INTEGER NOT NULL DEFAULT 0, drift_secs INTEGER NOT NULL DEFAULT 0, work_secs INTEGER NOT NULL DEFAULT 0, monitored_secs INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE session_recent(local_day TEXT NOT NULL, slot INTEGER NOT NULL, peak INTEGER NOT NULL DEFAULT 0, session_secs INTEGER NOT NULL DEFAULT 0, engaged_secs INTEGER NOT NULL DEFAULT 0, distract_secs INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(local_day, slot));
+             CREATE TABLE session_hourly(local_day TEXT NOT NULL, local_hour INTEGER NOT NULL, peak INTEGER NOT NULL DEFAULT 0, session_secs INTEGER NOT NULL DEFAULT 0, engaged_secs INTEGER NOT NULL DEFAULT 0, distract_secs INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(local_day, local_hour));",
+        ).unwrap();
+        c.execute("INSERT INTO day_stats(local_day, work_secs) VALUES('2026-06-01', 42)", []).unwrap();
+        c.pragma_update(None, "user_version", 9i64).unwrap();
+
+        migrate(&c).unwrap();
+
+        // the v10 columns now exist (prepare validates column names) ...
+        assert!(c.prepare("SELECT work_app_secs FROM day_stats").is_ok(), "day_stats.work_app_secs missing after migrate");
+        assert!(c.prepare("SELECT work_secs FROM session_recent").is_ok(), "session_recent.work_secs missing after migrate");
+        assert!(c.prepare("SELECT work_secs FROM session_hourly").is_ok(), "session_hourly.work_secs missing after migrate");
+        // ... pre-existing data is intact (no wipe) and the real read path works.
+        assert_eq!(load_day_stats(&c, "2026-06-01"), (0, 0, 0, 42, 0, 0));
     }
 
     #[test]
