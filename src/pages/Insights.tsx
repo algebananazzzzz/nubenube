@@ -175,10 +175,11 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
   const avg = insights.avgSessions ?? 0
   // wall-clock seconds one bar spans, for the distraction-share denominator.
   const bucketSecs = range === 'today' ? 15 * 60 : range === 'week' ? 2 * 3600 : 24 * 3600
-  // distraction as a share of each bar's span: peak = busiest bucket; avg = mean
-  // over buckets that have data (present), so idle gaps don't dilute it.
+  // distraction headline = total time lost in the range (honest day_stats total,
+  // matches the breakdown card); avg = mean share over buckets with data (present),
+  // so idle gaps don't dilute it — this is what the chart's avg line marks.
+  const distractTotal = insights.distractSecs ?? 0
   const fracs = series.filter((p) => p.present).map((p) => (bucketSecs > 0 ? Math.min(1, (p.distractSecs ?? 0) / bucketSecs) : 0))
-  const distractPeak = fracs.reduce((m, f) => Math.max(m, f), 0)
   const distractAvg = fracs.length ? fracs.reduce((a, f) => a + f, 0) / fracs.length : 0
   return (
     <Card pad={22}>
@@ -197,8 +198,8 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
         </div>
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)', margin: '2px 0' }} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{distractPeak.toFixed(2)}</span>
-          <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>distract peak</span>
+          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{fmtSecs(distractTotal)}</span>
+          <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>distracted</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span className="nn-num" style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', lineHeight: 0.9 }}>{distractAvg.toFixed(2)}</span>
