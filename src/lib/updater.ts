@@ -28,7 +28,17 @@ export async function checkForUpdates(opts?: { manual?: boolean }): Promise<void
     }
     u.setPending(info);
   } catch (e) {
-    if (opts?.manual) u.setNotice(`Update check failed: ${e}`);
+    // A 404 on the stable endpoint means no production release exists yet — give
+    // a friendlier nudge to Beta instead of the raw fetch error.
+    if (opts?.manual) {
+      const msg = String(e);
+      const noStableRelease = channel === 'stable' && /release JSON|fetch|404/i.test(msg);
+      u.setNotice(
+        noStableRelease
+          ? 'No stable release published yet — switch to Beta for the latest builds.'
+          : `Update check failed: ${e}`
+      );
+    }
     // launch check stays silent on failure
   }
 }

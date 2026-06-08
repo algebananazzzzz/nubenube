@@ -24,7 +24,7 @@ const DEFAULTS: Prefs = {
   chimeVolume: 0.6,
   companion: true,
   companionMini: false,
-  updateChannel: 'stable',
+  updateChannel: 'beta', // beta until a stable release exists; beta ships features sooner
 }
 
 // localStorage is untyped — coerce persisted enums back into their known sets.
@@ -33,7 +33,7 @@ function normalize(p: Prefs): Prefs {
     ...p,
     chimeVoice: CHIME_VOICES.includes(p.chimeVoice) ? p.chimeVoice : DEFAULTS.chimeVoice,
     chimeVolume: Math.max(0, Math.min(1, Number(p.chimeVolume) || DEFAULTS.chimeVolume)),
-    updateChannel: p.updateChannel === 'beta' ? 'beta' : 'stable',
+    updateChannel: p.updateChannel === 'stable' ? 'stable' : 'beta',
   }
 }
 
