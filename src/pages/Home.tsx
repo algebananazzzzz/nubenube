@@ -4,31 +4,9 @@
 import { useNavigate } from 'react-router-dom'
 import { useUsage } from '../store/usage'
 import { api } from '../lib/api'
-import { useNube, statusFor, cueFor, timerFor, type NubeState } from '../lib/derive'
+import { useNube, statusFor, cueFor, timerFor } from '../lib/derive'
 import { Card, Pill, Btn, Dot, LifeBar, Eyebrow } from '../components/ui'
 import { Sky, Nube } from '../components/NubeCreature'
-
-// drift countdown — net-rate seconds-to-faint with progress bar
-function Countdown({ s, compact }: { s: NubeState; compact?: boolean }) {
-  if (s.remaining == null) return null
-  const crit = s.life < 30
-  const tone = crit ? 'var(--critical)' : 'var(--warning)'
-  const surf = crit ? 'var(--critical-surface)' : 'var(--warning-surface)'
-  const bd = crit ? 'var(--critical-border)' : 'var(--warning-border)'
-  return (
-    <div style={{ background: surf, border: `1px solid ${bd}`, borderRadius: 'var(--r-md)', padding: compact ? '9px 11px' : '11px 13px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: compact ? 10 : 10.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: tone }}>
-          <Dot tone={tone} size={6} pulse /> {s.fainting ? 'Nube has fainted' : 'Nube faints in'}
-        </span>
-        <span className="nn-num" style={{ fontSize: compact ? 16 : 21, fontWeight: 700, color: tone, lineHeight: 1 }}>{s.fmtCountdown(s.remaining)}</span>
-      </div>
-      <div style={{ marginTop: compact ? 7 : 9, height: compact ? 4 : 5, borderRadius: 999, background: 'var(--surface-strong)', overflow: 'hidden' }}>
-        <div style={{ width: `${s.countdownPct * 100}%`, height: '100%', background: tone, borderRadius: 999, transition: 'width 1s linear' }} />
-      </div>
-    </div>
-  )
-}
 
 function HeroCockpit() {
   const s = useNube()
@@ -58,23 +36,25 @@ function HeroCockpit() {
           <Dot tone={st.tone} pulse={st.pulse} size={9} />
           <span className="nn-disp" style={{ fontSize: 21, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cue.title}</span>
           <span style={{ flex: 1 }} />
-          {s.remaining == null && timerFor(s) && <span className="nn-mono" style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--faint)', whiteSpace: 'nowrap', flexShrink: 0 }}>{timerFor(s)}</span>}
+          {timerFor(s) && <span className="nn-mono" style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--faint)', whiteSpace: 'nowrap', flexShrink: 0 }}>{timerFor(s)}</span>}
         </div>
 
         <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.5, marginTop: 8, textWrap: 'pretty' }}>{cue.line}</div>
 
-        {s.remaining != null && <div style={{ marginTop: 14 }}><Countdown s={s} /></div>}
-
         <div style={{ flex: 1, minHeight: 14 }} />
 
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, marginBottom: 8 }}>
-          <Eyebrow style={{ fontSize: 10.5 }}>Nube's life</Eyebrow>
+          <Eyebrow style={{ fontSize: 10.5 }}>Daily budget</Eyebrow>
           <span style={{ flex: 1 }} />
           {deltaPill}
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
           <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: lifeTone, lineHeight: .9 }}>{Math.round(s.life)}</span>
           <span className="nn-num" style={{ fontSize: 18, fontWeight: 600, color: 'var(--faint)' }}>%</span>
+          <span style={{ flex: 1 }} />
+          <span className="nn-num" style={{ fontSize: 14, fontWeight: 600, color: s.fainting ? 'var(--critical)' : 'var(--faint)' }}>
+            {s.fainting ? 'budget spent' : `${s.fmtClock(s.budgetLeft)} left`}
+          </span>
         </div>
         <div style={{ marginTop: 12 }}><LifeBar life={s.life} baseline={s.baseline} cap={s.cap} height={10} /></div>
 
