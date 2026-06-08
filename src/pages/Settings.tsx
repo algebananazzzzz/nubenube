@@ -43,7 +43,7 @@ function AppRow({ name, on, onToggle, last }: { name: string; on: boolean; onTog
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{name}</div>
         <div style={{ fontSize: 12, color: on ? 'var(--critical)' : 'var(--faint)', fontWeight: 500, marginTop: 1 }}>
-          {on ? 'Drains health while Claude is waiting' : 'Ignored'}
+          {on ? 'Spends your daily budget' : 'Ignored'}
         </div>
       </div>
       <Toggle on={on} onChange={onToggle} />
@@ -96,22 +96,18 @@ function SectionTitle({ children, right }: { children: ReactNode; right?: ReactN
 }
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const DAY_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const WEEKDAYS = [0, 1, 2, 3, 4]
 const WEEKEND = [5, 6]
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 
-// "How Nube reacts": the two rate knobs are per-weekday — pick a day and edit, or
-// apply the day's values to a whole group. Grace stays a single global knob.
-function HowNubeReacts({ sens, save }: { sens: Sensitivity; save: (patch: Partial<SettingsT>) => Promise<void> }) {
+// "Daily rhythm": the two rate knobs are per-weekday — pick a day and edit, or
+// apply the day's values to a whole group. Grace is split out as a global knob.
+function DailyRhythm({ sens, save }: { sens: Sensitivity; save: (patch: Partial<SettingsT>) => Promise<void> }) {
   const [day, setDay] = useState(() => (new Date().getDay() + 6) % 7) // 0=Mon … 6=Sun
   const overrides = sens.dayOverrides ?? []
   const ovr = (wd: number) => overrides.find((o) => o.weekday === wd)
   const ttdFor = (wd: number) => ovr(wd)?.timeToDeathMin ?? sens.timeToDeathMin
   const ratioFor = (wd: number) => ovr(wd)?.healDrainRatio ?? sens.healDrainRatio
-  const differs = (wd: number) =>
-    Math.round(ttdFor(wd)) !== Math.round(sens.timeToDeathMin) ||
-    Math.round(ratioFor(wd) * 100) !== Math.round(sens.healDrainRatio * 100)
 
   const writeOverrides = (next: DayOverride[]) =>
     void save({ sensitivity: { ...sens, dayOverrides: next.sort((a, b) => a.weekday - b.weekday) } })
@@ -138,35 +134,44 @@ function HowNubeReacts({ sens, save }: { sens: Sensitivity; save: (patch: Partia
         onClick={() => setDay(wd)}
         className="nn-ui"
         style={{
-          position: 'relative', padding: '6px 11px', borderRadius: 'var(--r-sm)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          padding: '8px 6px', borderRadius: 'var(--r-sm)', fontSize: 12, fontWeight: 600, cursor: 'pointer', textAlign: 'center',
           border: `1px solid ${on ? 'var(--accent-border)' : 'var(--line)'}`,
           background: on ? 'var(--accent-surface)' : 'var(--surface-faint)',
           color: on ? 'var(--accent-text)' : weekend ? 'var(--teal)' : 'var(--text)',
         }}
       >
         {DAY_LABELS[wd]}
-        {differs(wd) && <span style={{ position: 'absolute', top: 4, right: 5, width: 4, height: 4, borderRadius: '50%', background: on ? 'var(--accent-text)' : 'var(--accent)' }} />}
       </button>
     )
   }
 
   return (
     <Card pad={20}>
-      <SectionTitle>How Nube reacts</SectionTitle>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{WEEKDAYS.map(chip)}</div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>{WEEKEND.map(chip)}</div>
-      <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 10 }}>
-        Editing <b style={{ color: 'var(--ink)' }}>{DAY_FULL[day]}</b> · a dot marks days that differ from the default.
-      </div>
-      <SliderRow title="Nube dies after" value={Math.round(ttdFor(day))} min={1} max={60} step={1} onChange={(v) => upsertDay(day, { timeToDeathMin: v })} accent="var(--warning)" fmt={(v) => `${v} mins of drift`} />
+      <SectionTitle>Daily rhythm</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6, marginBottom: 20 }}>{ALL_DAYS.map(chip)}</div>
+      <SliderRow title="Daily distraction allowance" value={Math.round(ttdFor(day))} min={5} max={120} step={5} onChange={(v) => upsertDay(day, { timeToDeathMin: v })} accent="var(--warning)" fmt={(v) => `${v} min/day`} />
       <SliderRow title="Health restoration" value={Math.round(ratioFor(day) * 100)} min={1} max={50} step={1} onChange={(v) => upsertDay(day, { healDrainRatio: v / 100 })} accent="var(--success)" fmt={(v) => `factor of ${v}%`} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 0 16px', borderBottom: '1px solid var(--line-faint)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 0 0' }}>
         <span style={{ fontSize: 12, color: 'var(--faint)' }}>Apply values to:</span>
-        <Btn variant="line" size="sm" onClick={() => applyToDays(WEEKDAYS)}>Weekdays</Btn>
-        <Btn variant="line" size="sm" onClick={() => applyToDays(WEEKEND)}>Weekends</Btn>
-        <Btn variant="line" size="sm" onClick={() => applyToDays(ALL_DAYS)}>All</Btn>
+        <Btn variant="line" size="sm" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => applyToDays(WEEKDAYS)}>Weekdays</Btn>
+        <Btn variant="line" size="sm" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => applyToDays(WEEKEND)}>Weekends</Btn>
+        <Btn variant="line" size="sm" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => applyToDays(ALL_DAYS)}>All</Btn>
       </div>
-      <SliderRow title="Grace period before draining" value={sens.graceSecs} min={1} max={60} step={1} onChange={(v) => void save({ sensitivity: { ...sens, graceSecs: v } })} accent="var(--warning)" fmt={(v) => `${v}s`} last />
+    </Card>
+  )
+}
+
+// Global (not per-day): grace before a waiting turn escalates the drain, and how
+// much harder distraction hits while a turn is waiting on you.
+function DriftPenalty({ sens, save }: { sens: Sensitivity; save: (patch: Partial<SettingsT>) => Promise<void> }) {
+  return (
+    <Card pad={20}>
+      <SectionTitle>Drift penalty</SectionTitle>
+      <div style={{ fontSize: 12.5, color: 'var(--faint)', lineHeight: 1.5, marginBottom: 4 }}>
+        Distractions always spend your daily budget. When Claude has finished and is waiting on you, they spend it faster.
+      </div>
+      <SliderRow title="Grace before a waiting turn counts" value={sens.graceSecs} min={1} max={60} step={1} onChange={(v) => void save({ sensitivity: { ...sens, graceSecs: v } })} accent="var(--warning)" fmt={(v) => `${v}s`} />
+      <SliderRow title="Drain multiplier while waiting" value={sens.waitingMultiplier} min={1} max={10} step={0.5} onChange={(v) => void save({ sensitivity: { ...sens, waitingMultiplier: v } })} accent="var(--critical)" fmt={(v) => `${v}×`} last />
     </Card>
   )
 }
@@ -273,7 +278,7 @@ export function Settings() {
   return (
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 14, alignItems: 'start' }}>
-        {/* LEFT */}
+        {/* LEFT — focus behaviour: what drains the Nube, then how it reacts */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card pad={20}>
             <SectionTitle right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Pill tone="amber" style={{ fontSize: 11.5 }}>{tagged.length} draining</Pill><Btn variant="line" size="sm" onClick={scan}>{scanning ? 'Scanning…' : 'Scan apps'}</Btn></div>}>
@@ -287,6 +292,12 @@ export function Settings() {
             </div>
           </Card>
 
+          <DailyRhythm sens={sens} save={save} />
+          <DriftPenalty sens={sens} save={save} />
+        </div>
+
+        {/* RIGHT — the app: connection, appearance, sound, maintenance */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card pad={20}>
             <SectionTitle right={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600, color: connection?.connected ? 'var(--success)' : 'var(--faint)' }}><Dot tone={connection?.connected ? 'var(--success)' : 'var(--faint)'} size={7} pulse={connection?.connected} /> {connection?.connected ? 'Connected' : 'Not connected'}</span>}>
               Claude Code
@@ -300,21 +311,20 @@ export function Settings() {
               The hook tells Nube the moment Claude finishes a turn, so drift only counts while Claude is actually idle.
             </div>
           </Card>
-        </div>
-
-        {/* RIGHT */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <HowNubeReacts sens={sens} save={save} />
 
           <Card pad={20}>
-            <SectionTitle>Preferences</SectionTitle>
+            <SectionTitle>General</SectionTitle>
             <PrefRow title="Theme" desc="Configure your preferred theme.">
               <SegTabs<Theme> tabs={[{ key: 'dark', label: 'Dark' }, { key: 'light', label: 'Light' }]} value={theme} onChange={(v) => setPref('theme', v)} size="sm" />
             </PrefRow>
-            <PrefRow title="Desktop companion" desc="A floating widget that watches over you.">
+            <PrefRow title="Desktop companion" desc="A floating widget that watches over you." last>
               <Toggle on={companion} onChange={(v) => setPref('companion', v)} />
             </PrefRow>
-            <PrefRow title="Sound" desc="A chime when Claude finishes and is waiting on you; a notification when you drift.">
+          </Card>
+
+          <Card pad={20}>
+            <SectionTitle>Sound</SectionTitle>
+            <PrefRow title="Sound" desc="A chime when Claude finishes and is waiting on you; a notification when you drift." last={!sound}>
               <Toggle on={sound} onChange={(v) => setPref('sound', v)} />
             </PrefRow>
             {sound && (
@@ -342,7 +352,7 @@ export function Settings() {
               <SliderRow title="Chime volume" value={Math.round(chimeVolume * 100)} min={0} max={100} step={5} onChange={(v) => setPref('chimeVolume', v / 100)} accent="var(--accent)" fmt={(v) => `${v}%`} />
             )}
             {sound && (
-              <PrefRow title="Notification sound" desc="Plays when you drift to a distraction app.">
+              <PrefRow title="Notification sound" desc="Plays when you drift to a distraction app." last>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {settings.notificationSoundName && settings.notificationSoundPath ? (
                     <>
@@ -365,7 +375,11 @@ export function Settings() {
                 {notifSoundError && <div style={{ fontSize: 12, color: 'var(--critical)', marginTop: 6 }}>{notifSoundError}</div>}
               </PrefRow>
             )}
-            <PrefRow title="Updates" desc={`v${version}`} last>
+          </Card>
+
+          <Card pad={20}>
+            <SectionTitle right={<Pill style={{ fontSize: 11.5 }}>v{version}</Pill>}>Updates</SectionTitle>
+            <PrefRow title="Release channel" desc="Beta builds get new features sooner." last>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <SegTabs<UpdateChannel> tabs={[{ key: 'stable', label: 'Stable' }, { key: 'beta', label: 'Beta' }]} value={updateChannel} onChange={(v) => setPref('updateChannel', v)} size="sm" />
                 <Btn variant="line" size="sm" onClick={() => void onCheckUpdates()} disabled={checking}>{checking ? 'Checking…' : 'Check'}</Btn>
