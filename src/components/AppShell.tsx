@@ -12,6 +12,7 @@ import { useNube, statusFor } from '../lib/derive'
 import { themeVars } from '../lib/clay'
 import { Nube } from './NubeCreature'
 import { Dot } from './ui'
+import { UpdatePrompt } from './UpdatePrompt'
 
 type NavDef = { key: string; to: string; label: string; icon: (a: boolean) => ReactNode }
 
@@ -129,6 +130,7 @@ export function AppShell() {
           </div>
         </div>
       </div>
+      <UpdatePrompt />
     </div>
   )
 }
