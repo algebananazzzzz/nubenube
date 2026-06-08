@@ -10,7 +10,7 @@ import { usePrefs } from '../store/prefs'
 import { hueSwatch, sessionTier } from '../lib/clay'
 import { formatCount } from '../lib/format'
 import type { Insights as InsightsData, Project, RangeKey, SessionPoint, TokenBreakdown } from '../types'
-import { Card, Pill, Eyebrow, Donut, SegTabs } from '../components/ui'
+import { Card, Eyebrow, Donut, SegTabs } from '../components/ui'
 
 const RANGE_LABEL: Record<RangeKey, string> = {
   today: 'today', week: 'this week', month: 'this month', all: 'all-time',
@@ -43,27 +43,17 @@ function waterFromTokens(t: TokenBreakdown): number {
 function WaterHero({ range, tokens }: { range: RangeKey; tokens: TokenBreakdown }) {
   const rl = RANGE_LABEL[range]
   const litres = Math.round(waterFromTokens(tokens) / 1000)
-  const tokCount = formatCount(sumTokens(tokens))
   return (
-    <Card pad={22}>
+    <Card pad={22} style={{ display: 'flex', flexDirection: 'column' }}>
       <Eyebrow style={{ fontSize: 12, marginBottom: 12 }}>Water evaporated · {rl}</Eyebrow>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
         <span className="nn-num" style={{ fontSize: 52, fontWeight: 700, color: 'var(--ink)', lineHeight: 0.9 }}>{litres.toLocaleString()}</span>
         <span className="nn-disp" style={{ fontSize: 20, fontWeight: 600, color: 'var(--faint)' }}>litres</span>
       </div>
-      <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-        <Pill kind="neutral" style={{ fontSize: 12 }}>{tokCount} tokens {rl}</Pill>
-      </div>
-      <div style={{ marginTop: 13, paddingTop: 13, borderTop: '1px solid var(--line-faint)', display: 'flex', gap: 8, fontSize: 12, color: 'var(--faint)', lineHeight: 1.5 }}>
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ flexShrink: 0, marginTop: 1 }}>
-          <circle cx="8" cy="8" r="6.5" />
-          <path d="M8 7.2v3.4" strokeLinecap="round" />
-          <circle cx="8" cy="5" r=".7" fill="currentColor" stroke="none" />
-        </svg>
-        <span>
-          Estimation: about <strong style={{ color: 'var(--text)', fontWeight: 600 }}>0.2 mL</strong> of data-center cooling water per 1,000 tokens read (output tokens cost ~8× more), grounded in{' '}
-          <a href="https://arxiv.org/abs/2304.03271" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-text)', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}>real research ↗</a>
-        </span>
+      {/* footnote pinned to the bottom so the card reads as header + footer at any height */}
+      <div style={{ marginTop: 'auto', paddingTop: 13, borderTop: '1px solid var(--line-faint)', fontSize: 12, color: 'var(--faint)', lineHeight: 1.5 }}>
+        ~<strong style={{ color: 'var(--text)', fontWeight: 600 }}>0.2 mL</strong> cooling water per 1,000 tokens read (output ~8× more) ·{' '}
+        <a href="https://arxiv.org/abs/2304.03271" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-text)', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}>research ↗</a>
       </div>
     </Card>
   )
@@ -330,9 +320,9 @@ export function Insights() {
       {/* hero + token composition */}
       <div style={{ display: 'grid', gridTemplateColumns: TWO_UP, gap: 14, alignItems: 'stretch' }}>
         <WaterHero range={range} tokens={T} />
-        <Card pad={20}>
+        <Card pad={20} style={{ display: 'flex', flexDirection: 'column' }}>
           <Eyebrow style={{ fontSize: 12, marginBottom: 12 }}>Token composition · {rl}</Eyebrow>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 24 }}>
             <Donut segments={toks.map((t) => ({ value: t.value, color: t.color }))} label={formatCount(totalTok)} sub="tokens" size={116} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minWidth: 0 }}>
               {toks.map((t) => (
