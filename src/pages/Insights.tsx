@@ -1,9 +1,11 @@
 // Insights: range-scoped water + token composition, focus split, distraction
 // breakdown, and the all-time projects list. Backed by get_insights/get_projects.
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { events } from '../lib/api'
 import { useUsage } from '../store/usage'
+import { useFocus } from '../store/focus'
 import { usePrefs } from '../store/prefs'
 import { hueSwatch, sessionTier } from '../lib/clay'
 import { formatCount } from '../lib/format'
@@ -67,25 +69,34 @@ function tierColor(n: number, dark: boolean): string {
   return t <= 0 ? hueSwatch(240, dark) : hueSwatch(sessionTier(t).hue, dark)
 }
 
-// SVG bar time-graph of concurrency. viewBox is fixed; the svg scales to its
-// container width (height:auto). Today = a 96-cell 15-min grid across the full
-// day: colored bars where sessions ran, dashed nubs where the app was off, and a
-// faint track for the not-yet-happened rest of the day. Longer ranges = 1 bar/day.
-function SessionGraph({ series, dark, avg }: { series: SessionPoint[]; dark: boolean; avg: number }) {
-  const W = 600, H = 150, padL = 10, padR = 10, padT = 12, padB = 22
-  const innerW = W - padL - padR, innerH = H - padT - padB, baseY = padT + innerH
+// SVG diverging time-graph: concurrency avg bars rise above a center line,
+// distraction share (distractSecs / bucketSecs, 0–100%) hangs below. Each half
+// scales to its own max so both use full height. The in-progress bucket's session
+// bar breathes so "now" reads as live. viewBox fixed; svg scales to container
+// width. bucketSecs = wall-clock seconds one bar spans (today 15-min, week
+// 2-hour, else a day).
+function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[]; dark: boolean; avg: number; bucketSecs: number }) {
+  const W = 600, H = 184, padL = 10, padR = 10, padT = 14, padB = 24
+  const innerW = W - padL - padR, innerH = H - padT - padB
+  const centerY = padT + innerH * 0.56 // sessions get a touch more room than distraction
+  const baseY = padT + innerH
+  const topH = centerY - padT, botH = baseY - centerY
   const n = series.length
-  // Bars show each bucket's engaged-weighted avg concurrency; scale the y-axis to
-  // the tallest bar so the chart uses its full height.
   const maxBar = Math.max(0.001, ...series.map((p) => p.avg))
+  const fracOf = (p: SessionPoint) => (p.present && bucketSecs > 0 ? Math.min(1, p.distractSecs / bucketSecs) : 0)
+  const maxFrac = Math.max(0.001, ...series.map(fracOf))
   const cellW = innerW / n
   const gap = Math.min(cellW * 0.3, 3)
   const barW = Math.max(1, cellW - gap)
   const left = (i: number) => padL + i * cellW + gap / 2
-  const yOf = (v: number) => baseY - Math.min(1, v / maxBar) * innerH
-  const stroke = tierColor(maxBar, dark)
-  const avgY = yOf(avg)
+  const topY = (v: number) => centerY - Math.min(1, v / maxBar) * topH
+  const botEnd = (f: number) => centerY + Math.min(1, f / maxFrac) * botH
+  const sessColor = tierColor(maxBar, dark)
+  const avgY = topY(avg)
   const firstFuture = series.findIndex((p) => p.future)
+  // the in-progress bucket: cell just before the future track (or the last cell
+  // when nothing is future). Its bar pulses so "now" reads as live.
+  const nowIdx = firstFuture > 0 ? firstFuture - 1 : firstFuture < 0 ? n - 1 : -1
 
   // ~6 evenly spaced x labels (first … last)
   const ticks = Math.min(n, 6)
@@ -93,7 +104,7 @@ function SessionGraph({ series, dark, avg }: { series: SessionPoint[]; dark: boo
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', marginTop: 14, overflow: 'visible' }}>
-      {/* faint "rest of today" track + a divider at now */}
+      {/* faint "rest of period" track + a divider at now */}
       {firstFuture >= 0 && (
         <>
           <rect x={left(firstFuture) - gap / 2} y={padT} width={W - padR - (left(firstFuture) - gap / 2)} height={innerH} fill="var(--surface-strong)" opacity={0.35} />
@@ -101,12 +112,12 @@ function SessionGraph({ series, dark, avg }: { series: SessionPoint[]; dark: boo
         </>
       )}
 
-      {/* top + base gridlines */}
-      <line x1={padL} y1={padT} x2={W - padR} y2={padT} stroke="var(--line-faint)" strokeWidth={1} />
-      <line x1={padL} y1={baseY} x2={W - padR} y2={baseY} stroke="var(--line)" strokeWidth={1} />
+      {/* center baseline + half max labels (sessions ↑ / distraction ↓) */}
+      <line x1={padL} y1={centerY} x2={W - padR} y2={centerY} stroke="var(--line)" strokeWidth={1} />
       <text x={padL} y={padT - 3} fontSize={10} fill="var(--faint)" className="nn-num">{maxBar.toFixed(1)}</text>
+      <text x={padL} y={centerY + 12} fontSize={10} fill="var(--warning)" className="nn-num">{Math.round(maxFrac * 100)}%</text>
 
-      {/* avg reference line */}
+      {/* session avg reference line (top half) */}
       {avg > 0 && (
         <>
           <line x1={padL} y1={avgY} x2={W - padR} y2={avgY} stroke="var(--faint)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
@@ -114,25 +125,32 @@ function SessionGraph({ series, dark, avg }: { series: SessionPoint[]; dark: boo
         </>
       )}
 
-      {/* bars (avg concurrency) · dashed nubs (app off) · nothing for future/idle */}
+      {/* bars: sessions up (in-progress one breathes) · distraction down · dashed
+          nub at center for gaps · nothing for future/idle. */}
       {series.map((p, i) => {
         if (p.future) return null
         if (!p.present) {
-          return <line key={i} x1={left(i)} y1={baseY} x2={left(i) + barW} y2={baseY} stroke="var(--faint)" strokeWidth={2} strokeDasharray="2 3" opacity={0.4} />
+          return <line key={i} x1={left(i)} y1={centerY} x2={left(i) + barW} y2={centerY} stroke="var(--faint)" strokeWidth={2} strokeDasharray="2 3" opacity={0.4} />
         }
-        if (p.avg <= 0) return null // app on but idle → baseline only
-        return <rect key={i} x={left(i)} y={yOf(p.avg)} width={barW} height={baseY - yOf(p.avg)} rx={Math.min(2, barW / 2)} fill={stroke} opacity={0.9} />
+        const f = fracOf(p)
+        return (
+          <g key={i}>
+            {p.avg > 0 && <rect x={left(i)} y={topY(p.avg)} width={barW} height={centerY - topY(p.avg)} rx={Math.min(2, barW / 2)} fill={sessColor} opacity={0.9}
+              style={i === nowIdx ? { animation: 'nn-bar-pulse 1.8s ease-in-out infinite' } : undefined} />}
+            {f > 0 && <rect x={left(i)} y={centerY} width={barW} height={botEnd(f) - centerY} rx={Math.min(2, barW / 2)} fill="var(--warning)" opacity={0.85} />}
+          </g>
+        )
       })}
 
       {/* x labels */}
       {tickIdx.map((i) => (
-        <text key={`l${i}`} x={left(i) + barW / 2} y={H - 6} fontSize={9.5} fill="var(--faint)" textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} className="nn-num">{series[i].label}</text>
+        <text key={`l${i}`} x={left(i) + barW / 2} y={H - 7} fontSize={9.5} fill="var(--faint)" textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} className="nn-num">{series[i].label}</text>
       ))}
 
       {/* per-bucket hover targets */}
       {series.map((p, i) => (
         <rect key={`h${i}`} x={padL + i * cellW} y={padT} width={cellW} height={innerH} fill="transparent">
-          <title>{p.future ? `${p.label} · upcoming` : p.present ? `${p.label} · peak ${p.peak}, avg ${p.avg.toFixed(1)}` : `${p.label} · no data`}</title>
+          <title>{p.future ? `${p.label} · upcoming` : p.present ? `${p.label} · avg ${p.avg.toFixed(1)} sessions · ${fmtSecs(p.distractSecs)} distracted (${Math.round(fracOf(p) * 100)}%)` : `${p.label} · no data`}</title>
         </rect>
       ))}
     </svg>
@@ -145,10 +163,12 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
   // "peak" = the tallest bar = the highest bucket average (peak of the averages).
   const peakAvg = series.reduce((m, p) => Math.max(m, p.avg), 0)
   const avg = insights.avgSessions ?? 0
+  // wall-clock seconds one bar spans, for the distraction-share denominator.
+  const bucketSecs = range === 'today' ? 15 * 60 : range === 'week' ? 2 * 3600 : 24 * 3600
   return (
     <Card pad={22}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <Eyebrow style={{ fontSize: 12, marginBottom: 6 }}>Concurrent sessions · {rl}</Eyebrow>
+        <Eyebrow style={{ fontSize: 12, marginBottom: 6 }}>Sessions &amp; distraction · {rl}</Eyebrow>
         <span style={{ fontSize: 11.5, color: 'var(--faint)', fontWeight: 500 }}>{range === 'today' ? '15-min' : range === 'week' ? '2-hour' : 'daily'}</span>
       </div>
       <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', marginTop: 8 }}>
@@ -162,8 +182,8 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
         </div>
       </div>
 
-      {peakAvg > 0 && series.length >= 2 ? (
-        <SessionGraph series={series} dark={dark} avg={avg} />
+      {series.length >= 2 ? (
+        <SessionGraph series={series} dark={dark} avg={avg} bucketSecs={bucketSecs} />
       ) : (
         <div style={{ marginTop: 14, fontSize: 12.5, color: 'var(--faint)', lineHeight: 1.5 }}>
           Run more sessions side by side to warm your Nube — color climbs from indigo to gold as you fan out.
@@ -244,14 +264,37 @@ export function Insights() {
   const projects = useUsage((s) => s.projects)
   const range = useUsage((s) => s.range)
   const setRange = useUsage((s) => s.setRange)
+  const refreshInsights = useUsage((s) => s.refreshInsights)
   const loaded = useUsage((s) => s.loaded)
   const dark = usePrefs((s) => s.theme) === 'dark'
+  // live concurrency from the focus tick — running + waiting = the value the graph plots
+  const concurrency = useFocus((s) => s.tick.runningSessions + s.tick.waitingSessions)
+
+  // Keep the concurrency graph live: poll so the time axis advances and the
+  // current bucket fills, and refresh instantly when the connector sees new
+  // usage. Cadence scales with bucket size (today = 15-min cells, sampled often).
+  useEffect(() => {
+    const ms = range === 'today' ? 10_000 : range === 'week' ? 30_000 : 60_000
+    const id = setInterval(() => void refreshInsights(), ms)
+    const un = events.onUsageUpdated(() => void refreshInsights())
+    return () => { clearInterval(id); void un.then((f) => f()) }
+  }, [range, refreshInsights])
+
+  // The moment concurrency actually changes (session starts/ends), pull fresh
+  // insights so the current bucket reflects it without waiting for the poll.
+  const prevConc = useRef(concurrency)
+  useEffect(() => {
+    if (prevConc.current === concurrency) return
+    prevConc.current = concurrency
+    void refreshInsights()
+  }, [concurrency, refreshInsights])
 
   if (loaded && (!totals || totals.waterMl <= 0) && projects.length === 0) return <InsightsEmpty />
 
   const dist = insights?.distractionBreakdown ?? []
   const maxD = Math.max(...dist.map((d) => d.secs), 1)
-  const totalDistract = dist.reduce((a, d) => a + d.secs, 0)
+  // Honest total from day_stats (matches Home); breakdown is best-effort per-app.
+  const totalDistract = insights?.distractSecs ?? 0
   const rl = RANGE_LABEL[range]
 
   const T = insights?.tokens ?? { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 }
@@ -282,8 +325,8 @@ export function Insights() {
         <Card pad={20}>
           <Eyebrow style={{ fontSize: 12, marginBottom: 6 }}>{rl}</Eyebrow>
           <FocusRow label="Claude working" value={fmtSecs(insights?.claudeActiveSecs ?? 0)} tone="var(--success)" />
-          <FocusRow label="Claude idle" value={fmtSecs(insights?.claudeIdleSecs ?? 0)} tone="var(--warning)" />
-          <FocusRow label="Time on distractions" value={fmtSecs(totalDistract)} tone="var(--critical)" last />
+          <FocusRow label="Distracted" value={fmtSecs(totalDistract)} tone="var(--warning)" />
+          <FocusRow label="Drifted" value={fmtSecs(insights?.driftSecs ?? 0)} tone="var(--critical)" last />
         </Card>
       </div>
 

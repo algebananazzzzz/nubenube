@@ -49,11 +49,11 @@ function NavItem({ item }: { item: NavDef }) {
   )
 }
 
-// sidebar status chip: life % + state label or drift countdown; links Home
+// sidebar status chip: life % + state label, or budget-left while on a distraction; links Home
 function HomeBloop() {
   const s = useNube()
   const st = statusFor(s.effState, s.appName)
-  const drift = s.remaining != null
+  const drift = s.effState === 'drifting' || s.effState === 'chillin'
   const cdTone = s.life < 30 ? 'var(--critical)' : 'var(--warning)'
   return (
     <NavLink to="/" end style={{ textDecoration: 'none' }}>
@@ -72,7 +72,7 @@ function HomeBloop() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4 }}>
             <Dot tone={drift ? cdTone : st.tone} size={6} pulse={st.pulse} />
             <span className={drift ? 'nn-num' : undefined} style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: drift ? cdTone : 'var(--faint)', fontWeight: drift ? 600 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {drift ? `${s.fmtCountdown(s.remaining ?? 0)} left` : st.label}
+              {drift ? `${s.fmtClock(s.budgetLeft)} left` : st.label}
             </span>
           </div>
         </div>

@@ -37,23 +37,23 @@ function MiniStat({ tone, value, label }: { tone: string; value: ReactNode; labe
   )
 }
 
-// drift countdown — net-rate seconds-to-faint with progress bar
-function CompactCountdown({ s }: { s: NubeState }) {
-  if (s.remaining == null) return null
+// budget urgency — minutes of today's distraction budget left + a bar
+function CompactBudget({ s }: { s: NubeState }) {
   const crit = s.life < 30
   const tone = crit ? 'var(--critical)' : 'var(--warning)'
   const surf = crit ? 'var(--critical-surface)' : 'var(--warning-surface)'
   const bd = crit ? 'var(--critical-border)' : 'var(--warning-border)'
+  const pct = s.budgetTotal > 0 ? Math.max(0, Math.min(1, s.budgetLeft / s.budgetTotal)) : 0
   return (
     <div style={{ background: surf, border: `1px solid ${bd}`, borderRadius: 'var(--r-md)', padding: '8px 10px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: tone }}>
-          <Dot tone={tone} size={5} pulse /> {s.fainting ? 'fainted' : 'faints in'}
+          <Dot tone={tone} size={5} pulse /> {s.fainting ? 'budget spent' : 'budget left'}
         </span>
-        <span className="nn-num" style={{ fontSize: 15, fontWeight: 700, color: tone, lineHeight: 1 }}>{s.fmtCountdown(s.remaining)}</span>
+        <span className="nn-num" style={{ fontSize: 15, fontWeight: 700, color: tone, lineHeight: 1 }}>{s.fmtClock(s.budgetLeft)}</span>
       </div>
       <div style={{ marginTop: 6, height: 4, borderRadius: 999, background: 'var(--surface-strong)', overflow: 'hidden' }}>
-        <div style={{ width: `${s.countdownPct * 100}%`, height: '100%', background: tone, borderRadius: 999, transition: 'width 1s linear' }} />
+        <div style={{ width: `${pct * 100}%`, height: '100%', background: tone, borderRadius: 999, transition: 'width 1s linear' }} />
       </div>
     </div>
   )
@@ -86,10 +86,10 @@ function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: 
           <span className="nn-num" style={{ flexShrink: 0, fontSize: 14, fontWeight: 700, color: lifeTone }}>{Math.round(s.life)}%</span>
         </div>
 
-        {/* urgency when drifting, otherwise the at-a-glance life bar */}
+        {/* budget urgency while on a distraction, otherwise the at-a-glance life bar */}
         <div style={{ marginTop: 11 }}>
-          {s.effState === 'drifting'
-            ? <CompactCountdown s={s} />
+          {s.effState === 'drifting' || s.effState === 'chillin'
+            ? <CompactBudget s={s} />
             : <LifeBar life={s.life} baseline={s.baseline} cap={s.cap} height={8} labels={false} />}
         </div>
 
@@ -110,7 +110,7 @@ function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: 
 function CompanionMini({ s, onExpand, innerRef }: { s: NubeState; onExpand: () => void; innerRef: Ref<HTMLDivElement> }) {
   const st = statusFor(s.effState, s.appName)
   const lifeTone = s.life >= 100 ? 'var(--success)' : s.life < 30 ? 'var(--critical)' : 'var(--warning)'
-  const drift = s.remaining != null
+  const drift = s.effState === 'drifting' || s.effState === 'chillin'
   const cdTone = s.life < 30 ? 'var(--critical)' : 'var(--warning)'
   return (
     // inline-flex → the pill is exactly as wide as its content (no trailing gap)
@@ -129,7 +129,7 @@ function CompanionMini({ s, onExpand, innerRef }: { s: NubeState; onExpand: () =
       {drift && (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: cdTone, flexShrink: 0 }}>
           <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="7" cy="8" r="5" /><path d="M7 5.5V8l1.6 1" strokeLinecap="round" /><path d="M5.5 1.5h3" strokeLinecap="round" /></svg>
-          <span className="nn-num" style={{ fontSize: 13.5, fontWeight: 700 }}>{s.fmtCountdown(s.remaining ?? 0)}</span>
+          <span className="nn-num" style={{ fontSize: 13.5, fontWeight: 700 }}>{s.fmtClock(s.budgetLeft)}</span>
         </span>
       )}
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }} title="running"><Dot tone="var(--success)" size={6} /><span className="nn-num" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{s.run}</span></span>
