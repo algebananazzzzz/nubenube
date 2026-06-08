@@ -115,7 +115,7 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
       {/* center baseline + half max labels (sessions ↑ / distraction ↓) */}
       <line x1={padL} y1={centerY} x2={W - padR} y2={centerY} stroke="var(--line)" strokeWidth={1} />
       <text x={padL} y={padT - 3} fontSize={10} fill="var(--faint)" className="nn-num">{maxBar.toFixed(1)}</text>
-      <text x={padL} y={centerY + 12} fontSize={10} fill="var(--warning)" className="nn-num">{Math.round(maxFrac * 100)}%</text>
+      <text x={padL} y={centerY + 12} fontSize={10} fill="var(--critical)" className="nn-num">{Math.round(maxFrac * 100)}%</text>
 
       {/* session avg reference line (top half) */}
       {avg > 0 && (
@@ -137,7 +137,7 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
           <g key={i}>
             {p.avg > 0 && <rect x={left(i)} y={topY(p.avg)} width={barW} height={centerY - topY(p.avg)} rx={Math.min(2, barW / 2)} fill={sessColor} opacity={0.9}
               style={i === nowIdx ? { animation: 'nn-bar-pulse 1.8s ease-in-out infinite' } : undefined} />}
-            {f > 0 && <rect x={left(i)} y={centerY} width={barW} height={botEnd(f) - centerY} rx={Math.min(2, barW / 2)} fill="var(--warning)" opacity={0.85} />}
+            {f > 0 && <rect x={left(i)} y={centerY} width={barW} height={botEnd(f) - centerY} rx={Math.min(2, barW / 2)} fill="var(--critical)" opacity={0.85} />}
           </g>
         )
       })}
