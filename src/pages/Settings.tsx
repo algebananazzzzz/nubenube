@@ -36,17 +36,23 @@ function AppAvatar({ name, color }: { name: string; color: string }) {
   )
 }
 
-function AppRow({ name, on, onToggle, last }: { name: string; on: boolean; onToggle: () => void; last?: boolean }) {
+type AppClassKey = 'distraction' | 'neutral' | 'work'
+
+function AppRow({ name, value, onChange, last }: { name: string; value: AppClassKey; onChange: (v: AppClassKey) => void; last?: boolean }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 2px', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
       <AppAvatar name={name} color={colorFor(name)} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{name}</div>
-        <div style={{ fontSize: 12, color: on ? 'var(--critical)' : 'var(--faint)', fontWeight: 500, marginTop: 1 }}>
-          {on ? 'Spends your daily budget' : 'Ignored'}
-        </div>
-      </div>
-      <Toggle on={on} onChange={onToggle} />
+      <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+      <SegTabs<AppClassKey>
+        size="sm"
+        value={value}
+        onChange={onChange}
+        tabs={[
+          { key: 'distraction', label: 'Distraction', tone: 'critical' },
+          { key: 'neutral', label: 'Neutral' },
+          { key: 'work', label: 'Work', tone: 'work' },
+        ]}
+      />
     </div>
   )
 }
@@ -248,21 +254,26 @@ export function Settings() {
   if (!settings) return <div style={{ color: 'var(--faint)', fontSize: 13 }}>Loading…</div>
 
   const tagged = settings.distractionApps
-  const isOn = (name: string) => tagged.some((d) => d.toLowerCase() === name.toLowerCase())
+  const worked = settings.workApps ?? []
+  const isDistraction = (name: string) => tagged.some((d) => d.toLowerCase() === name.toLowerCase())
+  const isWork = (name: string) => worked.some((w) => w.toLowerCase() === name.toLowerCase())
+  const classOf = (name: string): AppClassKey => (isDistraction(name) ? 'distraction' : isWork(name) ? 'work' : 'neutral')
 
-  // union of discovered + tagged apps (tagged always show), draining ones first
+  // union of discovered + tagged + work apps (tagged/work always show); distractions first, then work.
   const seen = new Map<string, string>()
-  for (const n of [...discovered, ...tagged]) {
+  for (const n of [...discovered, ...tagged, ...worked]) {
     if (!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n)
   }
-  const apps = [...seen.values()].sort((a, b) => {
-    const oa = isOn(a) ? 0 : 1, ob = isOn(b) ? 0 : 1
-    return oa - ob || a.localeCompare(b)
-  })
+  const rank = (n: string) => (isDistraction(n) ? 0 : isWork(n) ? 1 : 2)
+  const apps = [...seen.values()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
 
-  const toggleApp = (name: string) => {
-    const next = isOn(name) ? tagged.filter((d) => d.toLowerCase() !== name.toLowerCase()) : [...tagged, name]
-    void save({ distractionApps: next })
+  const setClass = (name: string, cls: AppClassKey) => {
+    const low = name.toLowerCase()
+    const nextD = tagged.filter((d) => d.toLowerCase() !== low)
+    const nextW = worked.filter((w) => w.toLowerCase() !== low)
+    if (cls === 'distraction') nextD.push(name)
+    else if (cls === 'work') nextW.push(name)
+    void save({ distractionApps: nextD, workApps: nextW })
   }
 
   const scan = async () => {
@@ -281,14 +292,18 @@ export function Settings() {
         {/* LEFT — focus behaviour: what drains the Nube, then how it reacts */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card pad={20}>
-            <SectionTitle right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Pill tone="amber" style={{ fontSize: 11.5 }}>{tagged.length} draining</Pill><Btn variant="line" size="sm" onClick={scan}>{scanning ? 'Scanning…' : 'Scan apps'}</Btn></div>}>
-              Distractions
+            <SectionTitle right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Pill tone="danger" style={{ fontSize: 11.5 }}>{tagged.length} draining</Pill>
+              <Pill tone="work" style={{ fontSize: 11.5 }}>{worked.length} working</Pill>
+              <Btn variant="line" size="sm" onClick={scan}>{scanning ? 'Scanning…' : 'Scan apps'}</Btn>
+            </div>}>
+              Apps
             </SectionTitle>
             {apps.length === 0 && !scanning && (
               <div style={{ textAlign: 'center', padding: '20px 0 6px', color: 'var(--faint)', fontSize: 13 }}>No apps detected yet — run a scan.</div>
             )}
             <div style={{ maxHeight: 248, overflow: 'auto', margin: '0 -2px', paddingRight: 2 }}>
-              {apps.map((name, i) => <AppRow key={name} name={name} on={isOn(name)} onToggle={() => toggleApp(name)} last={i === apps.length - 1} />)}
+              {apps.map((name, i) => <AppRow key={name} name={name} value={classOf(name)} onChange={(v) => setClass(name, v)} last={i === apps.length - 1} />)}
             </div>
           </Card>
 
