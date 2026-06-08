@@ -115,8 +115,9 @@ function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
       const gap = c >= nowCell - 8 && c < nowCell - 4 // a recent ~1h break
       const present = !future && c >= start && !gap
       const peak = present ? 1 + ((c * 7) % 4) : 0
-      // plausible distraction share per 15-min (900s) cell
-      const distractSecs = present ? (c % 7 === 0 ? 300 : c % 3 === 0 ? 90 : 0) : 0
+      // demo distraction: wavy stretches with gaps, 0–~85% of each 15-min (900s) cell
+      const wave = (Math.sin(c / 2.5) * 0.5 + 0.5) * 540
+      const distractSecs = present ? Math.round(c % 5 === 0 ? 0 : wave + (c % 9 === 0 ? 240 : 0)) : 0
       return {
         label: `${String(Math.floor((c * 15) / 60)).padStart(2, '0')}:${String((c * 15) % 60).padStart(2, '0')}`,
         peak,
@@ -142,7 +143,7 @@ function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
         const present = !future && h0 >= 6 && h0 <= 20
         const inWin = h0 >= 8 && h0 <= 18
         const peak = present && inWin ? 1 + ((day * 12 + b) % 4) : 0
-        const distractSecs = present ? (inWin ? ((day + b) % 4 === 0 ? 1800 : 300) : 600) : 0
+        const distractSecs = present ? Math.round((Math.sin((day * 12 + b) / 2.2) * 0.5 + 0.5) * 3600 + (b % 6 === 0 ? 1200 : 0)) : 0
         return { label, peak, avg: bucketAvg(peak), distractSecs, present, future }
       })
     }).flat()
@@ -156,7 +157,7 @@ function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
     const future = day > todayD
     const present = !future && day % 6 !== 0 // demo gap every 6th day
     const peak = present ? 1 + (day % 5) : 0
-    const distractSecs = present ? (day % 3 === 0 ? 3600 : 600) : 0
+    const distractSecs = present ? Math.round((Math.sin(day / 1.7) * 0.5 + 0.5) * 16200 + (day % 4 === 0 ? 7200 : 0)) : 0
     return {
       label: `${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
       peak,
