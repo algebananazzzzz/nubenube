@@ -67,6 +67,7 @@ pub struct DriftRuntime {
     drift_secs: i64,     // wall-clock drifting secs (distraction while a turn waits)
     work_secs: i64,      // session-weighted Claude-working secs (Σ running·dt)
     monitored_secs: i64, // present-&-tracking wall-clock (everything but away)
+    work_app_secs: i64,  // wall-clock secs the foreground was a work app
     // settings cached by file mtime so the tick skips re-parsing unchanged ones.
     settings_cache: Option<(std::time::SystemTime, settings::Settings)>,
     // last life persisted to the DB; lets frozen/steady ticks skip the write.
@@ -191,6 +192,7 @@ impl DriftRuntime {
             drift_secs: 0,
             work_secs: 0,
             monitored_secs: 0,
+            work_app_secs: 0,
             settings_cache: None,
             last_saved_life: -1.0, // impossible value → first tick persists
         };
@@ -386,13 +388,14 @@ impl DriftRuntime {
         // reset-day-scoped activity totals; reloaded from day_stats on day change
         // so a restart doesn't zero them.
         if self.stats_day != reset_day {
-            let (a, d, dr, w, m) =
-                conn.as_ref().map_or((0, 0, 0, 0, 0), |c| db::load_day_stats(c, &reset_day));
+            let (a, d, dr, w, m, wa) =
+                conn.as_ref().map_or((0, 0, 0, 0, 0, 0), |c| db::load_day_stats(c, &reset_day));
             self.active_secs = a;
             self.distract_secs = d;
             self.drift_secs = dr;
             self.work_secs = w;
             self.monitored_secs = m;
+            self.work_app_secs = wa;
             self.stats_day = reset_day.clone();
         }
         // `active` = engaged time only (a session running/waiting, or on a
@@ -406,17 +409,20 @@ impl DriftRuntime {
         // `work` is session-weighted (Σ running·dt); `monitored` is all tracked time.
         let work_delta = if !frozen { dts * running_count } else { 0 };
         let monitored_delta = if !frozen { dts } else { 0 };
+        let work_app_delta = if !frozen && on_work_app { dts } else { 0 };
         let stats_delta = active_delta > 0
             || distract_delta > 0
             || drift_delta > 0
             || work_delta > 0
-            || monitored_delta > 0;
+            || monitored_delta > 0
+            || work_app_delta > 0;
         if stats_delta {
             self.active_secs += active_delta;
             self.distract_secs += distract_delta;
             self.drift_secs += drift_delta;
             self.work_secs += work_delta;
             self.monitored_secs += monitored_delta;
+            self.work_app_secs += work_app_delta;
         }
 
         // Every write this tick (per-app distraction, day totals, hourly
@@ -445,6 +451,7 @@ impl DriftRuntime {
                         drift_delta,
                         work_delta,
                         monitored_delta,
+                        work_app_delta,
                     );
                 }
                 // Mark this 5-min slot present (app running) so the graph shows a
@@ -519,6 +526,7 @@ impl DriftRuntime {
             distract_secs_today: self.distract_secs,
             drift_secs_today: self.drift_secs,
             work_secs_today: self.work_secs,
+            work_app_secs_today: self.work_app_secs,
             monitored_secs_today: self.monitored_secs,
             frozen,
         }

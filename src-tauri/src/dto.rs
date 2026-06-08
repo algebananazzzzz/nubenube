@@ -57,6 +57,7 @@ pub struct Insights {
     pub claude_active_secs: i64, // Claude working
     pub distract_secs: i64,      // total time on a distraction (honest; matches Home)
     pub drift_secs: i64,         // drift (distraction while a turn waits)
+    pub work_app_secs: i64,      // total wall-clock time on a work app
     pub distraction_breakdown: Vec<DistractionSlice>,
     pub peak_sessions: i64,      // max concurrent (running+waiting) over range
     pub avg_sessions: f64,       // time-weighted avg concurrent over engaged time in the range
@@ -116,6 +117,7 @@ pub struct FocusTickDto {
     pub distract_secs_today: i64,
     pub drift_secs_today: i64,
     pub work_secs_today: i64,
+    pub work_app_secs_today: i64, // today's wall-clock secs on a work app
     pub monitored_secs_today: i64,
     /// Meter frozen (away/idle) — UI stops its local live timers.
     pub frozen: bool,

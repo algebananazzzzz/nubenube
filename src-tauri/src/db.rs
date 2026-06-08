@@ -103,7 +103,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             distract_secs  INTEGER NOT NULL DEFAULT 0,
             drift_secs     INTEGER NOT NULL DEFAULT 0,
             work_secs      INTEGER NOT NULL DEFAULT 0,
-            monitored_secs INTEGER NOT NULL DEFAULT 0
+            monitored_secs INTEGER NOT NULL DEFAULT 0,
+            work_app_secs  INTEGER NOT NULL DEFAULT 0
         );
         -- concurrency history. session_recent holds the LIVE day(s) at 5-min
         -- resolution (slot = minute_of_day/5, 0..287) for the intra-day bar graph;
@@ -144,6 +145,11 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     );
     let _ = conn.execute(
         "ALTER TABLE day_stats ADD COLUMN drift_secs INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    // v10: per-day wall-clock seconds on a work app (work-apps feature).
+    let _ = conn.execute(
+        "ALTER TABLE day_stats ADD COLUMN work_app_secs INTEGER NOT NULL DEFAULT 0",
         [],
     );
     // backfill pre-monitored_secs rows (DEFAULT 0 but with real active_secs).
@@ -236,34 +242,37 @@ pub fn add_day_stats(
     drift_delta: i64,
     work_delta: i64,
     monitored_delta: i64,
+    work_app_delta: i64,
 ) {
-    if active_delta <= 0 && distract_delta <= 0 && drift_delta <= 0 && work_delta <= 0 && monitored_delta <= 0 {
+    if active_delta <= 0 && distract_delta <= 0 && drift_delta <= 0 && work_delta <= 0 && monitored_delta <= 0 && work_app_delta <= 0 {
         return;
     }
     let _ = conn.execute(
-        "INSERT INTO day_stats(local_day,active_secs,distract_secs,drift_secs,work_secs,monitored_secs)
-            VALUES(?1,?2,?3,?4,?5,?6)
+        "INSERT INTO day_stats(local_day,active_secs,distract_secs,drift_secs,work_secs,monitored_secs,work_app_secs)
+            VALUES(?1,?2,?3,?4,?5,?6,?7)
          ON CONFLICT(local_day) DO UPDATE SET
             active_secs    = active_secs + ?2,
             distract_secs  = distract_secs + ?3,
             drift_secs     = drift_secs + ?4,
             work_secs      = work_secs + ?5,
-            monitored_secs = monitored_secs + ?6",
+            monitored_secs = monitored_secs + ?6,
+            work_app_secs  = work_app_secs + ?7",
         params![
             day,
             active_delta.max(0),
             distract_delta.max(0),
             drift_delta.max(0),
             work_delta.max(0),
-            monitored_delta.max(0)
+            monitored_delta.max(0),
+            work_app_delta.max(0)
         ],
     );
 }
 
-/// (active, distract, drift, work, monitored) seconds for a reset-day; zeros if unseen.
-pub fn load_day_stats(conn: &Connection, day: &str) -> (i64, i64, i64, i64, i64) {
+/// (active, distract, drift, work, monitored, work_app) seconds for a reset-day; zeros if unseen.
+pub fn load_day_stats(conn: &Connection, day: &str) -> (i64, i64, i64, i64, i64, i64) {
     conn.query_row(
-        "SELECT active_secs, distract_secs, drift_secs, work_secs, monitored_secs FROM day_stats WHERE local_day=?1",
+        "SELECT active_secs, distract_secs, drift_secs, work_secs, monitored_secs, work_app_secs FROM day_stats WHERE local_day=?1",
         [day],
         |r| {
             Ok((
@@ -272,13 +281,14 @@ pub fn load_day_stats(conn: &Connection, day: &str) -> (i64, i64, i64, i64, i64)
                 r.get::<_, i64>(2)?,
                 r.get::<_, i64>(3)?,
                 r.get::<_, i64>(4)?,
+                r.get::<_, i64>(5)?,
             ))
         },
     )
     .optional()
     .ok()
     .flatten()
-    .unwrap_or((0, 0, 0, 0, 0))
+    .unwrap_or((0, 0, 0, 0, 0, 0))
 }
 
 /// Sample concurrency into the current 5-min slot of the live day: bump the slot's
@@ -921,14 +931,14 @@ pub fn get_insights(conn: &Connection, range: &str) -> Insights {
     // screens report one measurement.)
     // distract is the honest total (the per-app breakdown is best-effort and
     // undercounts legacy days whose drift_by_app rows predate the total switch).
-    let (active, distract, drift) = conn
+    let (active, distract, drift, work_app) = conn
         .query_row(
-            "SELECT COALESCE(SUM(work_secs),0), COALESCE(SUM(distract_secs),0), COALESCE(SUM(drift_secs),0)
+            "SELECT COALESCE(SUM(work_secs),0), COALESCE(SUM(distract_secs),0), COALESCE(SUM(drift_secs),0), COALESCE(SUM(work_app_secs),0)
              FROM day_stats WHERE local_day >= ?1",
             [&start],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?)),
         )
-        .unwrap_or((0, 0, 0));
+        .unwrap_or((0, 0, 0, 0));
 
     let distraction_breakdown = drift_app_breakdown(conn, range)
         .into_iter()
@@ -943,6 +953,7 @@ pub fn get_insights(conn: &Connection, range: &str) -> Insights {
         claude_active_secs: active,
         distract_secs: distract,
         drift_secs: drift,
+        work_app_secs: work_app,
         distraction_breakdown,
         peak_sessions,
         avg_sessions,
