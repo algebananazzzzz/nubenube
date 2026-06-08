@@ -99,18 +99,20 @@ fn waiting_load(
 
 /// Net budget rate (%-points/min). Drain hits on ANY distraction at base rate
 /// `R = baseline / budget_min`; a turn waiting on you multiplies the drain by
-/// `multiplier`. HEAL = `ratio·R` per running window (any foreground). Pure.
+/// `multiplier`. HEAL = `ratio·R` per heal unit, where heal units = running
+/// windows + 1 while the foreground is a work app (the +1x reward, stacks). Pure.
 pub fn life_rate(
     on_distraction: bool,
     waiting: bool,
     running: i64,
+    on_work_app: bool,
     baseline: f64,
     budget_min: f64,
     ratio: f64,
     multiplier: f64,
 ) -> f64 {
     let r = baseline / budget_min;
-    let heal = ratio * r * running as f64;
+    let heal = ratio * r * (running + on_work_app as i64) as f64;
     let drain = if on_distraction {
         r * if waiting { multiplier } else { 1.0 }
     } else {
@@ -353,10 +355,11 @@ impl DriftRuntime {
         // life_rate gates the two forces (DRAIN: distraction only; HEAL: any
         // foreground), so pass the raw counts.
         let on_distraction = matches!(class, AppClass::Distraction);
+        let on_work_app = matches!(class, AppClass::Work);
         let (budget_min, ratio) = settings::effective_rates(&s.sensitivity, weekday);
         let multiplier = s.sensitivity.waiting_multiplier.max(1.0);
         let waiting = waiting_count > 0; // past grace → X× escalation
-        let rate = life_rate(on_distraction, waiting, running_count, BASELINE, budget_min, ratio, multiplier);
+        let rate = life_rate(on_distraction, waiting, running_count, on_work_app, BASELINE, budget_min, ratio, multiplier);
         // drifting is positional: on a distraction while a turn waits past grace.
         let drifting = !frozen && on_distraction && waiting;
         let budget_total_secs = (budget_min * 60.0).round() as i64;
@@ -590,47 +593,57 @@ mod tests {
     #[test]
     fn base_drain_on_any_distraction() {
         // On a distraction, nothing waiting → 1× → −R.
-        let r = life_rate(true, false, 0, BASELINE, T, RATIO, X);
+        let r = life_rate(true, false, 0, false, BASELINE, T, RATIO, X);
         assert!((r - (-R)).abs() < 1e-9);
     }
 
     #[test]
     fn waiting_turn_multiplies_drain() {
         // On a distraction + a waiting turn → X× → −X·R.
-        let r = life_rate(true, true, 0, BASELINE, T, RATIO, X);
+        let r = life_rate(true, true, 0, false, BASELINE, T, RATIO, X);
         assert!((r - (-X * R)).abs() < 1e-9);
     }
 
     #[test]
     fn no_drain_off_distraction() {
         // Not on a distraction → no drain, even with a waiting turn.
-        assert_eq!(life_rate(false, true, 0, BASELINE, T, RATIO, X), 0.0);
+        assert_eq!(life_rate(false, true, 0, false, BASELINE, T, RATIO, X), 0.0);
     }
 
     #[test]
     fn heal_when_running_regardless_of_foreground() {
         // One running window heals ratio·R whether or not the foreground is a
         // distraction (on a distraction it nets against the base drain).
-        let on = life_rate(true, false, 1, BASELINE, T, RATIO, X);
+        let on = life_rate(true, false, 1, false, BASELINE, T, RATIO, X);
         assert!((on - (RATIO * R - R)).abs() < 1e-9);
-        let off = life_rate(false, false, 1, BASELINE, T, RATIO, X);
+        let off = life_rate(false, false, 1, false, BASELINE, T, RATIO, X);
         assert!((off - RATIO * R).abs() < 1e-9);
     }
 
     #[test]
     fn enough_running_outpaces_base_drain() {
         // Many running windows out-heal a 1× distraction → net positive.
-        let r = life_rate(true, false, 20, BASELINE, T, RATIO, X);
+        let r = life_rate(true, false, 20, false, BASELINE, T, RATIO, X);
         assert!(r > 0.0);
     }
 
     #[test]
     fn budget_rate_is_one_min_per_min_at_base() {
         // 1× distraction loses exactly 60 budget-secs/min; X× loses X·60.
-        let one = life_rate(true, false, 0, BASELINE, T, RATIO, X);
+        let one = life_rate(true, false, 0, false, BASELINE, T, RATIO, X);
         assert!((budget_rate_per_min(one, BASELINE, T) - (-60.0)).abs() < 1e-9);
-        let x = life_rate(true, true, 0, BASELINE, T, RATIO, X);
+        let x = life_rate(true, true, 0, false, BASELINE, T, RATIO, X);
         assert!((budget_rate_per_min(x, BASELINE, T) - (-60.0 * X)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn work_app_heals_like_one_running() {
+        // On a work app with no Claude sessions still heals at ratio·R (the +1x reward).
+        let solo = life_rate(false, false, 0, true, BASELINE, T, RATIO, X);
+        assert!((solo - RATIO * R).abs() < 1e-9);
+        // Stacks: work app + 2 running windows = 3× heal.
+        let stacked = life_rate(false, false, 2, true, BASELINE, T, RATIO, X);
+        assert!((stacked - 3.0 * RATIO * R).abs() < 1e-9);
     }
 
     // ----- apply_life -----
@@ -638,7 +651,7 @@ mod tests {
     #[test]
     fn apply_life_drains_over_dt() {
         // 1× distraction for 60s → −R points.
-        let rate = life_rate(true, false, 0, BASELINE, T, RATIO, X);
+        let rate = life_rate(true, false, 0, false, BASELINE, T, RATIO, X);
         let life = apply_life(BASELINE, 60.0, rate, false);
         assert!((life - (BASELINE - R)).abs() < 1e-9);
     }
