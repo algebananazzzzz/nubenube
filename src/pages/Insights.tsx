@@ -126,11 +126,11 @@ function SessionGraph({ series, dark, avg, bucketSecs, distractAvg }: { series: 
         </>
       )}
 
-      {/* distraction avg line (bottom, red) */}
+      {/* distraction avg line (bottom) */}
       {distractAvg > 0 && (
         <>
-          <line x1={padL} y1={distractAvgY} x2={W - padR} y2={distractAvgY} stroke="var(--critical)" strokeWidth={1} strokeDasharray="3 3" opacity={0.45} />
-          <text x={W - padR} y={distractAvgY + 10} fontSize={9.5} fill="var(--critical)" textAnchor="end" opacity={0.9}>avg {Math.round(distractAvg * 100)}%</text>
+          <line x1={padL} y1={distractAvgY} x2={W - padR} y2={distractAvgY} stroke="var(--faint)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
+          <text x={W - padR} y={distractAvgY + 10} fontSize={9.5} fill="var(--faint)" textAnchor="end">avg {distractAvg.toFixed(2)}</text>
         </>
       )}
 
@@ -160,7 +160,7 @@ function SessionGraph({ series, dark, avg, bucketSecs, distractAvg }: { series: 
       {/* per-bucket hover targets */}
       {series.map((p, i) => (
         <rect key={`h${i}`} x={padL + i * cellW} y={padT} width={cellW} height={innerH} fill="transparent">
-          <title>{p.future ? `${p.label} · upcoming` : p.present ? `${p.label} · avg ${p.avg.toFixed(1)} sessions · ${fmtSecs(p.distractSecs ?? 0)} distracted (${Math.round(fracOf(p) * 100)}%)` : `${p.label} · no data`}</title>
+          <title>{p.future ? `${p.label} · upcoming` : p.present ? `${p.label} · avg ${p.avg.toFixed(1)} sessions · ${fmtSecs(p.distractSecs ?? 0)} distracted (${fracOf(p).toFixed(2)})` : `${p.label} · no data`}</title>
         </rect>
       ))}
     </svg>
@@ -197,11 +197,11 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
         </div>
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)', margin: '2px 0' }} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{Math.round(distractPeak * 100)}%</span>
+          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{distractPeak.toFixed(2)}</span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>distract peak</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 22, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{Math.round(distractAvg * 100)}%</span>
+          <span className="nn-num" style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', lineHeight: 0.9 }}>{distractAvg.toFixed(2)}</span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>avg</span>
         </div>
       </div>
