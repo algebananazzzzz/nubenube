@@ -1,6 +1,6 @@
 [package]
 name = "nubenube"
-version = "0.3.4"
+version = "0.4.0"
 description = "Nube Nube — a gentle desktop focus companion powered by your Claude Code usage"
 authors = ["Nube Nube"]
 license = ""
