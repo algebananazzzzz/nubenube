@@ -68,11 +68,9 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-latest
-            args: ''
+            args: '--bundles deb,rpm'
           - platform: macos-latest
-            args: '--target universal-apple-darwin'
-          - platform: windows-latest
-            args: ''
+            args: '--target aarch64-apple-darwin'
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -86,8 +84,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          # Both targets needed for universal macOS build; ignored on other platforms
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          # Apple Silicon target; ignored on Linux
+          targets: aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
         with:
