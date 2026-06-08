@@ -42,7 +42,6 @@ pub struct DistractionSlice {
 #[serde(rename_all = "camelCase")]
 pub struct SessionPoint {
     pub label: String,  // bucket label: "HH:MM" (today, 15-min) or "MM-DD" (daily)
-    pub peak: i64,      // max concurrent (running+waiting) in the bucket
     pub avg: f64,       // time-weighted avg concurrent while engaged
     pub distract_secs: i64, // wall-clock distraction secs in the bucket
     pub work_secs: i64,     // wall-clock work-app secs in the bucket (graph base layer)
@@ -60,7 +59,6 @@ pub struct Insights {
     pub drift_secs: i64,         // drift (distraction while a turn waits)
     pub work_app_secs: i64,      // total wall-clock time on a work app
     pub distraction_breakdown: Vec<DistractionSlice>,
-    pub peak_sessions: i64,      // max concurrent (running+waiting) over range
     pub avg_sessions: f64,       // time-weighted avg concurrent over engaged time in the range
     pub session_series: Vec<SessionPoint>, // time graph over the whole period
 }
@@ -99,11 +97,11 @@ pub struct FocusTickDto {
     pub ts: String,
     pub state: String,
     pub app_name: String,
-    /// `life` on the 0..cap (130) scale (field kept named `cloudHealth`).
+    /// `life` on the 0..cap (300) scale (field kept named `cloudHealth`).
     pub cloud_health: f64,
     /// Full / "par" life and the daily reset level (100).
     pub baseline: f64,
-    /// Hard ceiling on life = baseline + banked bonus (130).
+    /// Hard ceiling on life = baseline + banked bonus (300).
     pub cap: f64,
     pub waiting_sessions: i64,
     pub running_sessions: i64,

@@ -135,12 +135,17 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
         const sh = Math.min(topH - wh, p.avg * pps) // Claude layer, stacked above work
         const dh = Math.min(botH, fracOf(p) * pps) // distraction (downward, red)
         const rx = Math.min(2, barW / 2)
+        // the in-progress bucket breathes — work + Claude layers pulse together.
+        const pulse = i === nowIdx ? { animation: 'nn-bar-pulse 1.8s ease-in-out infinite' } : undefined
         return (
           <g key={i}>
-            {wh > 0 && <rect x={left(i)} y={centerY - wh} width={barW} height={wh} rx={rx} fill="var(--work)" opacity={0.9} />}
-            {p.avg > 0 && <rect x={left(i)} y={centerY - wh - sh} width={barW} height={sh} rx={rx} fill={sessColor} opacity={0.9}
-              style={i === nowIdx ? { animation: 'nn-bar-pulse 1.8s ease-in-out infinite' } : undefined} />}
-            {wh > 0 && sh > 0 && <line x1={left(i)} y1={centerY - wh} x2={left(i) + barW} y2={centerY - wh} stroke="var(--surface)" strokeWidth={1} />}
+            {/* work + Claude share ONE animated group so they breathe in exact sync
+                (separate per-rect animations start on each element's own timeline and drift). */}
+            <g style={pulse}>
+              {wh > 0 && <rect x={left(i)} y={centerY - wh} width={barW} height={wh} rx={rx} fill="var(--work)" opacity={0.9} />}
+              {p.avg > 0 && <rect x={left(i)} y={centerY - wh - sh} width={barW} height={sh} rx={rx} fill={sessColor} opacity={0.9} />}
+              {wh > 0 && sh > 0 && <line x1={left(i)} y1={centerY - wh} x2={left(i) + barW} y2={centerY - wh} stroke="var(--surface)" strokeWidth={1} />}
+            </g>
             {dh > 0 && <rect x={left(i)} y={centerY} width={barW} height={dh} rx={rx} fill="var(--critical)" opacity={0.85} />}
           </g>
         )
@@ -164,8 +169,6 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
 function SessionsCard({ insights, range, dark }: { insights: InsightsData; range: RangeKey; dark: boolean }) {
   const rl = RANGE_LABEL[range]
   const series = insights.sessionSeries ?? []
-  // "peak" = the tallest bar = the highest bucket average (peak of the averages).
-  const peakAvg = series.reduce((m, p) => Math.max(m, p.avg), 0)
   const avg = insights.avgSessions ?? 0
   // "clauding" = session-weighted Claude-working time; distracted = total lost
   // (honest day_stats totals, matching Home + the breakdown card).
@@ -185,11 +188,7 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
       </div>
       <div style={{ display: 'flex', gap: 22, alignItems: 'flex-end', marginTop: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: 'var(--ink)', lineHeight: 0.9 }}>{peakAvg.toFixed(1)}</span>
-          <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>peak</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: hueSwatch(40, dark), lineHeight: 0.9 }}>{claudingN}<span style={{ fontSize: 15 }}>{claudingU}</span></span>
+          <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: hueSwatch(40, dark), lineHeight: 0.9 }}>{claudingN}<span style={{ fontSize: 15 }}>{claudingU}</span></span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>clauding</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>

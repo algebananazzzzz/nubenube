@@ -34,7 +34,7 @@ export type RangeKey = 'today' | 'week' | 'month' | 'all'
 
 export type DistractionSlice = { name: string; secs: number }
 
-export type SessionPoint = { label: string; peak: number; avg: number; distractSecs: number; workSecs?: number; present: boolean; future: boolean }
+export type SessionPoint = { label: string; avg: number; distractSecs: number; workSecs?: number; present: boolean; future: boolean }
 
 export type Insights = {
   range: RangeKey
@@ -44,7 +44,6 @@ export type Insights = {
   driftSecs: number // drift (distraction while a turn waits)
   workAppSecs: number // total wall-clock time on a work app over the range
   distractionBreakdown: DistractionSlice[]
-  peakSessions: number // max concurrent (running+waiting) over range
   avgSessions: number // time-weighted avg concurrent over engaged time in the range
   sessionSeries: SessionPoint[] // time graph over the whole period
 }
@@ -63,9 +62,9 @@ export type FocusTick = {
   ts: string
   state: FocusState
   appName: string
-  cloudHealth: number // life on the 0..cap (130) scale (NOT a 0..1 fraction)
+  cloudHealth: number // life on the 0..cap (300) scale (NOT a 0..1 fraction)
   baseline: number // full/par life — always 100
-  cap: number // max life incl. banked bonus — always 130
+  cap: number // max life incl. banked bonus — always 300
   waitingSessions: number // # Claude sessions stopped-and-waiting (past grace)
   runningSessions: number // # sessions currently running (Claude working)
   budgetTotalSecs: number // today's full budget in secs (baseline level = budget min · 60)
