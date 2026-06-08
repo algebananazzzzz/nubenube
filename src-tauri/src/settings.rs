@@ -62,6 +62,7 @@ impl Default for Sensitivity {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub distraction_apps: Vec<String>,
+    pub work_apps: Vec<String>,
     pub sensitivity: Sensitivity,
     pub drift_moment_intensity: String,
     pub log_roots: Vec<String>,
@@ -75,6 +76,7 @@ impl Default for Settings {
             // No prefilled distractions — empty list means classify() is always
             // Neutral until the user tags an app.
             distraction_apps: Vec::new(),
+            work_apps: Vec::new(),
             sensitivity: Sensitivity::default(),
             drift_moment_intensity: "gentle-notification".to_string(),
             log_roots: crate::store_paths::log_roots()
