@@ -70,88 +70,103 @@ export const mockTotals: Totals = {
   projectCount: 26,
 }
 
-export const mockInsights = (range: RangeKey): Insights => ({
-  range,
-  tokens: { cacheRead: 1.3e9, cacheCreate: 56.9e6, output: 9.3e6, input: 1.7e6 },
-  claudeActiveSecs: 51 * 60,
-  claudeIdleSecs: 1 * 60,
-  driftSecs: 36 + 26,
-  distractionBreakdown: [
-    { name: 'ChatGPT Atlas', secs: 36 },
-    { name: 'Telegram', secs: 26 },
-  ],
-  peakSessions: range === 'today' ? 4 : 5,
-  avgSessions: 2.3,
-  sessionSeries: range === 'today'
-    ? Array.from({ length: 96 }, (_, c) => {
-        // 96 × 15-min cells. Demo: app on from 07:00, a 12:00–13:00 gap, active
-        // windows 09:00–11:30 and 14:00–18:00, future after the current cell.
-        const now = new Date()
-        const nowCell = Math.floor((now.getHours() * 60 + now.getMinutes()) / 15)
-        const future = c > nowCell
-        const appOff = c >= 48 && c < 52
-        const present = !future && c >= 28 && !appOff
-        const inWin = (c >= 36 && c <= 46) || (c >= 56 && c <= 72)
-        const peak = present && inWin ? 1 + ((c * 7) % 4) : 0
-        return {
-          label: `${String(Math.floor((c * 15) / 60)).padStart(2, '0')}:${String((c * 15) % 60).padStart(2, '0')}`,
-          peak,
-          avg: peak ? Math.max(1, peak - 0.6) : 0,
-          present,
-          future,
-        }
+// rough range scale so wider windows show plausibly larger totals in dev.
+const RANGE_MUL: Record<RangeKey, number> = { today: 1, week: 4, month: 13, all: 22 }
+
+// avg within a bucket is always below its peak (a few sessions ramp up/down),
+// so the card's "peak" (max bucket avg) stays ≥ the overall avg.
+const bucketAvg = (peak: number) => (peak > 0 ? Math.max(0.6, peak - 0.7) : 0)
+
+export const mockInsights = (range: RangeKey): Insights => {
+  const sessionSeries = mockSessionSeries(range)
+  // Derive peak + avg FROM the series so they can never contradict the bars
+  // (avg is the engaged-weighted mean, always ≤ the tallest bucket avg).
+  const live = sessionSeries.filter((p) => p.present && p.avg > 0)
+  const peakSessions = sessionSeries.reduce((m, p) => Math.max(m, p.peak), 0)
+  const avgSessions = live.length ? live.reduce((a, p) => a + p.avg, 0) / live.length : 0
+  return {
+    range,
+    tokens: { cacheRead: 1.3e9, cacheCreate: 56.9e6, output: 9.3e6, input: 1.7e6 },
+    // Same measurement as Home's "Today" tile, scaled by range: working =
+    // Σ(running·dt) across sessions, distract + drift = total wall-clock (drift ⊂
+    // distract = breakdown sum). today matches mockTick so dev screens agree.
+    claudeActiveSecs: Math.round(2.6 * 3600 * RANGE_MUL[range]),
+    distractSecs: Math.round(14 * 60 * RANGE_MUL[range]),
+    driftSecs: Math.round(6 * 60 * RANGE_MUL[range]),
+    distractionBreakdown: [
+      { name: 'ChatGPT Atlas', secs: Math.round(9 * 60 * RANGE_MUL[range]) },
+      { name: 'Telegram', secs: Math.round(5 * 60 * RANGE_MUL[range]) },
+    ],
+    peakSessions,
+    avgSessions,
+    sessionSeries,
+  }
+}
+
+function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
+  const now = new Date()
+  if (range === 'today') {
+    // 96 × 15-min cells. Activity fills the cells leading up to "now" (relative,
+    // so bars always show regardless of the clock), with a one-hour gap.
+    const nowCell = Math.floor((now.getHours() * 60 + now.getMinutes()) / 15)
+    const start = Math.max(0, nowCell - 44) // ~11h of history
+    return Array.from({ length: 96 }, (_, c) => {
+      const future = c > nowCell
+      const gap = c >= nowCell - 8 && c < nowCell - 4 // a recent ~1h break
+      const present = !future && c >= start && !gap
+      const peak = present ? 1 + ((c * 7) % 4) : 0
+      // plausible distraction share per 15-min (900s) cell
+      const distractSecs = present ? (c % 7 === 0 ? 300 : c % 3 === 0 ? 90 : 0) : 0
+      return {
+        label: `${String(Math.floor((c * 15) / 60)).padStart(2, '0')}:${String((c * 15) % 60).padStart(2, '0')}`,
+        peak,
+        avg: bucketAvg(peak),
+        distractSecs,
+        present,
+        future,
+      }
+    })
+  }
+  if (range === 'week') {
+    // full Mon–Sun × 12 two-hour blocks; future after "now". Busy 08:00–18:00.
+    const wd = (now.getDay() + 6) % 7
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - wd)
+    return Array.from({ length: 7 }, (_, day) => {
+      const d = new Date(monday)
+      d.setDate(monday.getDate() + day)
+      const label = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      return Array.from({ length: 12 }, (_, b) => {
+        const h0 = b * 2
+        const future = day > wd || (day === wd && h0 > now.getHours())
+        const present = !future && h0 >= 6 && h0 <= 20
+        const inWin = h0 >= 8 && h0 <= 18
+        const peak = present && inWin ? 1 + ((day * 12 + b) % 4) : 0
+        const distractSecs = present ? (inWin ? ((day + b) % 4 === 0 ? 1800 : 300) : 600) : 0
+        return { label, peak, avg: bucketAvg(peak), distractSecs, present, future }
       })
-    : range === 'week'
-    ? Array.from({ length: 7 }, (_, day) =>
-        // full Mon–Sun × 12 two-hour blocks; future after "now". Busy 08:00–18:00.
-        Array.from({ length: 12 }, (_, b) => {
-          const now = new Date()
-          const wd = (now.getDay() + 6) % 7
-          const h0 = b * 2
-          const future = day > wd || (day === wd && h0 > now.getHours())
-          const present = !future && h0 >= 6
-          const inWin = h0 >= 8 && h0 <= 18
-          const peak = present && inWin ? 1 + ((day * 12 + b) % 4) : 0
-          return {
-            label: `06-0${day + 1}`,
-            peak,
-            avg: peak ? Math.max(1, peak - 0.6) : 0,
-            present,
-            future,
-          }
-        }),
-      ).flat()
-    : range === 'month'
-    ? (() => {
-        // full calendar month × 1 bar/day; future after today.
-        const now = new Date()
-        const mo = now.getMonth()
-        const days = new Date(now.getFullYear(), mo + 1, 0).getDate()
-        const todayD = now.getDate()
-        return Array.from({ length: days }, (_, i) => {
-          const day = i + 1
-          const future = day > todayD
-          const present = !future && day % 6 !== 0 // demo gap every 6th day
-          const peak = present ? 1 + (day % 5) : 0
-          return {
-            label: `${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-            peak,
-            avg: peak ? Math.max(1, peak - 0.6) : 0,
-            present,
-            future,
-          }
-        })
-      })()
-    : [
-        { label: '06-01', peak: 2, avg: 1.4, present: true, future: false },
-        { label: '06-02', peak: 3, avg: 1.8, present: true, future: false },
-        { label: '06-03', peak: 0, avg: 0, present: false, future: false },
-        { label: '06-04', peak: 4, avg: 2.6, present: true, future: false },
-        { label: '06-05', peak: 3, avg: 2.1, present: true, future: false },
-        { label: '06-06', peak: 5, avg: 3.0, present: true, future: false },
-        { label: '06-07', peak: 4, avg: 2.3, present: true, future: false },
-      ],
-})
+    }).flat()
+  }
+  // month / all: 1 bar/day across the calendar month, future after today.
+  const mo = now.getMonth()
+  const days = new Date(now.getFullYear(), mo + 1, 0).getDate()
+  const todayD = now.getDate()
+  return Array.from({ length: days }, (_, i) => {
+    const day = i + 1
+    const future = day > todayD
+    const present = !future && day % 6 !== 0 // demo gap every 6th day
+    const peak = present ? 1 + (day % 5) : 0
+    const distractSecs = present ? (day % 3 === 0 ? 3600 : 600) : 0
+    return {
+      label: `${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      peak,
+      avg: bucketAvg(peak),
+      distractSecs,
+      present,
+      future,
+    }
+  })
+}
 
 export const mockConnection: ConnectionStatus = {
   connected: true,
@@ -164,10 +179,11 @@ export const mockSettings: Settings = {
   distractionApps: ['ChatGPT Atlas', 'Telegram'],
   sensitivity: {
     graceSecs: 30,
-    timeToDeathMin: 12,
+    timeToDeathMin: 30,
     healDrainRatio: 0.1,
+    waitingMultiplier: 3,
     idleThresholdSecs: 120,
-    dayOverrides: [{ weekday: 5, timeToDeathMin: 25, healDrainRatio: 0.2 }, { weekday: 6, timeToDeathMin: 25, healDrainRatio: 0.2 }],
+    dayOverrides: [{ weekday: 5, timeToDeathMin: 60, healDrainRatio: 0.2 }, { weekday: 6, timeToDeathMin: 60, healDrainRatio: 0.2 }],
   },
   driftMomentIntensity: 'gentle-notification',
   logRoots: [],
@@ -203,7 +219,8 @@ export const mockFocusTick: FocusTick = {
   cap: 130,
   waitingSessions: 0,
   runningSessions: 1,
-  secondsToDeath: null,
+  budgetTotalSecs: 30 * 60,
+  budgetRatePerMin: 0, // calm vibing demo — budget steady
   activeSecsToday: Math.round(3.2 * 3600),
   distractSecsToday: 14 * 60,
   driftSecsToday: 6 * 60,
