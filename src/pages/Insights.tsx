@@ -176,11 +176,11 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
       </div>
       <div style={{ display: 'flex', gap: 22, alignItems: 'flex-end', marginTop: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: tierColor(peakAvg, dark), lineHeight: 0.9 }}>{peakAvg.toFixed(1)}</span>
+          <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: 'var(--ink)', lineHeight: 0.9 }}>{peakAvg.toFixed(1)}</span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>peak</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--success)', lineHeight: 0.9 }}>{claudingN}<span style={{ fontSize: 15 }}>{claudingU}</span></span>
+          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', lineHeight: 0.9 }}>{claudingN}<span style={{ fontSize: 15 }}>{claudingU}</span></span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>clauding</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -197,20 +197,6 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
         </div>
       )}
     </Card>
-  )
-}
-
-function DistractionRow({ name, secs, max, last }: { name: string; secs: number; max: number; last?: boolean }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '11px 0', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
-      <div style={{ width: 108, fontSize: 13.5, fontWeight: 500, color: 'var(--ink)', flexShrink: 0 }}>{name}</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ height: 8, borderRadius: 999, background: 'var(--surface-strong)', overflow: 'hidden' }}>
-          <div style={{ width: `${Math.max(8, (secs / max) * 100)}%`, height: '100%', borderRadius: 999, background: 'var(--warning)' }} />
-        </div>
-      </div>
-      <div className="nn-num" style={{ width: 38, textAlign: 'right', fontSize: 13, fontWeight: 600, color: 'var(--critical)' }}>{fmtSecs(secs)}</div>
-    </div>
   )
 }
 
@@ -289,10 +275,6 @@ export function Insights() {
 
   if (loaded && (!totals || totals.waterMl <= 0) && projects.length === 0) return <InsightsEmpty />
 
-  const dist = insights?.distractionBreakdown ?? []
-  const maxD = Math.max(...dist.map((d) => d.secs), 1)
-  // Honest total from day_stats (matches Home); breakdown is best-effort per-app.
-  const totalDistract = insights?.distractSecs ?? 0
   const rl = RANGE_LABEL[range]
 
   const T = insights?.tokens ?? { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 }
@@ -330,7 +312,6 @@ export function Insights() {
                   <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color, flexShrink: 0 }} />
                   <span style={{ fontWeight: 500, color: 'var(--ink)', flex: 1 }}>{t.label}</span>
                   <span className="nn-num" style={{ color: 'var(--text)', fontWeight: 600 }}>{formatCount(t.value)}</span>
-                  <span className="nn-num" style={{ color: 'var(--faint)', fontWeight: 500, width: 34, textAlign: 'right' }}>{Math.round((t.value / totalTok) * 100)}%</span>
                 </div>
               ))}
             </div>
@@ -340,20 +321,6 @@ export function Insights() {
 
       {/* concurrency history */}
       {insights && <SessionsCard insights={insights} range={range} dark={dark} />}
-
-      {/* distractions */}
-      <Card pad={22}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <Eyebrow style={{ fontSize: 12, marginBottom: 6 }}>Time lost to distractions · {rl}</Eyebrow>
-          <span className="nn-num" style={{ fontSize: 14, fontWeight: 600, color: 'var(--critical)' }}>{fmtSecs(totalDistract)}</span>
-        </div>
-        {dist.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '16px 0 4px', color: 'var(--faint)', fontSize: 13 }}>No distractions tracked {rl}. Nice.</div>
-        )}
-        {dist.map((d, i) => (
-          <DistractionRow key={d.name} name={d.name} secs={d.secs} max={maxD} last={i === dist.length - 1} />
-        ))}
-      </Card>
 
       {/* projects */}
       <Card pad={14}>
