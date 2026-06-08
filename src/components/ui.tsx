@@ -162,7 +162,7 @@ export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) =
 }
 
 export function SegTabs<T extends string>({ tabs, value, onChange, size = 'md' }: {
-  tabs: ({ key: T; label: string; tone?: string } | T)[]; value: T; onChange: (v: T) => void; size?: 'sm' | 'md'
+  tabs: ({ key: T; label: string } | T)[]; value: T; onChange: (v: T) => void; size?: 'sm' | 'md'
 }) {
   const py = size === 'sm' ? 5 : 7, fs = size === 'sm' ? 12.5 : 13
   return (
@@ -170,15 +170,11 @@ export function SegTabs<T extends string>({ tabs, value, onChange, size = 'md' }
       {tabs.map((t) => {
         const k = (typeof t === 'string' ? t : t.key) as T
         const label = typeof t === 'string' ? t : t.label
-        const tone = typeof t === 'string' ? undefined : t.tone // token base, e.g. 'critical' | 'work'
         const act = k === value
-        const tinted = act && tone
         return (
           <button key={k} onClick={() => onChange(k)} className="nn-ui" style={{
-            padding: `${py}px 13px`, fontSize: fs, fontWeight: 600, borderRadius: 'var(--r-sm)',
-            border: act ? `1px solid ${tinted ? `var(--${tone}-border)` : 'var(--line)'}` : '1px solid transparent', cursor: 'pointer',
-            background: act ? (tinted ? `var(--${tone}-surface)` : 'var(--surface)') : 'transparent',
-            color: act ? (tinted ? `var(--${tone})` : 'var(--ink)') : 'var(--faint)',
+            padding: `${py}px 13px`, fontSize: fs, fontWeight: 600, borderRadius: 'var(--r-sm)', border: act ? '1px solid var(--line)' : '1px solid transparent', cursor: 'pointer',
+            background: act ? 'var(--surface)' : 'transparent', color: act ? 'var(--ink)' : 'var(--faint)',
             boxShadow: act ? 'var(--shadow-sm)' : 'none', transition: 'all .15s var(--ease)', whiteSpace: 'nowrap',
           }}>{label}</button>
         )

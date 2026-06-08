@@ -38,21 +38,40 @@ function AppAvatar({ name, color }: { name: string; color: string }) {
 
 type AppClassKey = 'distraction' | 'neutral' | 'work'
 
+// Tri-state app-class switch styled as a sliding toggle: a neutral track with a
+// single colored thumb that slides to left/center/right — distraction (red) ·
+// neutral (gray) · work (indigo). Only the thumb carries color; position + color
+// carry the meaning, no text labels. Hover title names the state for affordance.
+const CLASS_ORDER: { key: AppClassKey; tone: string; title: string }[] = [
+  { key: 'distraction', tone: 'var(--critical)', title: 'Distraction' },
+  { key: 'neutral', tone: 'var(--faint)', title: 'Neutral' },
+  { key: 'work', tone: 'var(--work)', title: 'Work' },
+]
+function ClassSwitch({ value, onChange }: { value: AppClassKey; onChange: (v: AppClassKey) => void }) {
+  const CELL = 28, H = 18, PAD = 3
+  const idx = Math.max(0, CLASS_ORDER.findIndex((c) => c.key === value))
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', padding: PAD, background: 'var(--surface-strong)', borderRadius: 'var(--r-pill)', flexShrink: 0 }}>
+      {/* sliding thumb — the only colored element; takes the active state's tone */}
+      <div aria-hidden style={{
+        position: 'absolute', top: PAD, left: PAD + idx * CELL, width: CELL, height: H,
+        borderRadius: 'var(--r-pill)', background: CLASS_ORDER[idx].tone, boxShadow: 'var(--shadow-sm)',
+        transition: 'left .2s var(--ease), background .2s var(--ease)',
+      }} />
+      {CLASS_ORDER.map(({ key, title }) => (
+        <button key={key} type="button" onClick={() => onChange(key)} title={title} aria-label={title} aria-pressed={key === value} className="nn-ui"
+          style={{ position: 'relative', zIndex: 1, width: CELL, height: H, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }} />
+      ))}
+    </div>
+  )
+}
+
 function AppRow({ name, value, onChange, last }: { name: string; value: AppClassKey; onChange: (v: AppClassKey) => void; last?: boolean }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 2px', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
       <AppAvatar name={name} color={colorFor(name)} />
       <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-      <SegTabs<AppClassKey>
-        size="sm"
-        value={value}
-        onChange={onChange}
-        tabs={[
-          { key: 'distraction', label: 'Distraction', tone: 'critical' },
-          { key: 'neutral', label: 'Neutral' },
-          { key: 'work', label: 'Work', tone: 'work' },
-        ]}
-      />
+      <ClassSwitch value={value} onChange={onChange} />
     </div>
   )
 }
@@ -259,13 +278,13 @@ export function Settings() {
   const isWork = (name: string) => worked.some((w) => w.toLowerCase() === name.toLowerCase())
   const classOf = (name: string): AppClassKey => (isDistraction(name) ? 'distraction' : isWork(name) ? 'work' : 'neutral')
 
-  // union of discovered + tagged + work apps (tagged/work always show); distractions first, then work.
+  // union of discovered + tagged + work apps (tagged/work always show). Stable
+  // alphabetical order so a row never jumps position when its class changes.
   const seen = new Map<string, string>()
   for (const n of [...discovered, ...tagged, ...worked]) {
     if (!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n)
   }
-  const rank = (n: string) => (isDistraction(n) ? 0 : isWork(n) ? 1 : 2)
-  const apps = [...seen.values()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+  const apps = [...seen.values()].sort((a, b) => a.localeCompare(b))
 
   const setClass = (name: string, cls: AppClassKey) => {
     const low = name.toLowerCase()
