@@ -70,29 +70,31 @@ function tierColor(n: number, dark: boolean): string {
 }
 
 // SVG diverging time-graph: concurrency avg bars rise above a center line,
-// distraction share (distractSecs / bucketSecs, 0–100%) hangs below. Each half
-// scales to its own max so both use full height. The in-progress bucket's session
-// bar breathes so "now" reads as live. viewBox fixed; svg scales to container
-// width. bucketSecs = wall-clock seconds one bar spans (today 15-min, week
-// 2-hour, else a day).
-function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[]; dark: boolean; avg: number; bucketSecs: number }) {
+// distraction share (distractSecs / bucketSecs) hangs below on the SAME axis —
+// a fully-distracted bucket equals one concurrent session (fraction 1.0 == 1×),
+// so distraction usually reads shorter than multi-session bars. Dashed avg lines
+// on each side; the in-progress bucket's session bar breathes. bucketSecs =
+// wall-clock seconds one bar spans (today 15-min, week 2-hour, else a day).
+function SessionGraph({ series, dark, avg, bucketSecs, distractAvg }: { series: SessionPoint[]; dark: boolean; avg: number; bucketSecs: number; distractAvg: number }) {
   const W = 600, H = 184, padL = 10, padR = 10, padT = 14, padB = 24
   const innerW = W - padL - padR, innerH = H - padT - padB
-  const centerY = padT + innerH * 0.56 // sessions get a touch more room than distraction
+  const half = innerH / 2 // symmetric halves so 1 unit up == 1 unit down
+  const centerY = padT + half
   const baseY = padT + innerH
-  const topH = centerY - padT, botH = baseY - centerY
   const n = series.length
   const maxBar = Math.max(0.001, ...series.map((p) => p.avg))
+  // one shared scale for both halves: distraction fraction (≤1) is plotted in the
+  // same "sessions" units, anchored so 1.0 == one concurrent session.
+  const maxVal = Math.max(maxBar, 1)
+  const pps = half / maxVal // pixels per unit
   const fracOf = (p: SessionPoint) => (p.present && bucketSecs > 0 ? Math.min(1, (p.distractSecs ?? 0) / bucketSecs) : 0)
-  const maxFrac = Math.max(0.001, ...series.map(fracOf))
   const cellW = innerW / n
   const gap = Math.min(cellW * 0.3, 3)
   const barW = Math.max(1, cellW - gap)
   const left = (i: number) => padL + i * cellW + gap / 2
-  const topY = (v: number) => centerY - Math.min(1, v / maxBar) * topH
-  const botEnd = (f: number) => centerY + Math.min(1, f / maxFrac) * botH
   const sessColor = tierColor(maxBar, dark)
-  const avgY = topY(avg)
+  const avgY = centerY - Math.min(half, avg * pps)
+  const distractAvgY = centerY + Math.min(half, distractAvg * pps)
   const firstFuture = series.findIndex((p) => p.future)
   // the in-progress bucket: cell just before the future track (or the last cell
   // when nothing is future). Its bar pulses so "now" reads as live.
@@ -112,16 +114,23 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
         </>
       )}
 
-      {/* center baseline + half max labels (sessions ↑ / distraction ↓) */}
+      {/* center baseline + top-of-scale label (sessions ↑ / distraction ↓) */}
       <line x1={padL} y1={centerY} x2={W - padR} y2={centerY} stroke="var(--line)" strokeWidth={1} />
-      <text x={padL} y={padT - 3} fontSize={10} fill="var(--faint)" className="nn-num">{maxBar.toFixed(1)}</text>
-      <text x={padL} y={centerY + 12} fontSize={10} fill="var(--critical)" className="nn-num">{Math.round(maxFrac * 100)}%</text>
+      <text x={padL} y={padT - 3} fontSize={10} fill="var(--faint)" className="nn-num">{maxVal.toFixed(1)}</text>
 
-      {/* session avg reference line (top half) */}
+      {/* session avg line (top) */}
       {avg > 0 && (
         <>
           <line x1={padL} y1={avgY} x2={W - padR} y2={avgY} stroke="var(--faint)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
           <text x={W - padR} y={avgY - 3} fontSize={9.5} fill="var(--faint)" textAnchor="end">avg {avg.toFixed(1)}</text>
+        </>
+      )}
+
+      {/* distraction avg line (bottom, red) */}
+      {distractAvg > 0 && (
+        <>
+          <line x1={padL} y1={distractAvgY} x2={W - padR} y2={distractAvgY} stroke="var(--critical)" strokeWidth={1} strokeDasharray="3 3" opacity={0.45} />
+          <text x={W - padR} y={distractAvgY + 10} fontSize={9.5} fill="var(--critical)" textAnchor="end" opacity={0.9}>avg {Math.round(distractAvg * 100)}%</text>
         </>
       )}
 
@@ -132,12 +141,13 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
         if (!p.present) {
           return <line key={i} x1={left(i)} y1={centerY} x2={left(i) + barW} y2={centerY} stroke="var(--faint)" strokeWidth={2} strokeDasharray="2 3" opacity={0.4} />
         }
-        const f = fracOf(p)
+        const sh = Math.min(half, p.avg * pps)
+        const dh = Math.min(half, fracOf(p) * pps)
         return (
           <g key={i}>
-            {p.avg > 0 && <rect x={left(i)} y={topY(p.avg)} width={barW} height={centerY - topY(p.avg)} rx={Math.min(2, barW / 2)} fill={sessColor} opacity={0.9}
+            {p.avg > 0 && <rect x={left(i)} y={centerY - sh} width={barW} height={sh} rx={Math.min(2, barW / 2)} fill={sessColor} opacity={0.9}
               style={i === nowIdx ? { animation: 'nn-bar-pulse 1.8s ease-in-out infinite' } : undefined} />}
-            {f > 0 && <rect x={left(i)} y={centerY} width={barW} height={botEnd(f) - centerY} rx={Math.min(2, barW / 2)} fill="var(--critical)" opacity={0.85} />}
+            {dh > 0 && <rect x={left(i)} y={centerY} width={barW} height={dh} rx={Math.min(2, barW / 2)} fill="var(--critical)" opacity={0.85} />}
           </g>
         )
       })}
@@ -165,13 +175,18 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
   const avg = insights.avgSessions ?? 0
   // wall-clock seconds one bar spans, for the distraction-share denominator.
   const bucketSecs = range === 'today' ? 15 * 60 : range === 'week' ? 2 * 3600 : 24 * 3600
+  // distraction as a share of each bar's span: peak = busiest bucket; avg = mean
+  // over buckets that have data (present), so idle gaps don't dilute it.
+  const fracs = series.filter((p) => p.present).map((p) => (bucketSecs > 0 ? Math.min(1, (p.distractSecs ?? 0) / bucketSecs) : 0))
+  const distractPeak = fracs.reduce((m, f) => Math.max(m, f), 0)
+  const distractAvg = fracs.length ? fracs.reduce((a, f) => a + f, 0) / fracs.length : 0
   return (
     <Card pad={22}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <Eyebrow style={{ fontSize: 12, marginBottom: 6 }}>Sessions &amp; distraction · {rl}</Eyebrow>
         <span style={{ fontSize: 11.5, color: 'var(--faint)', fontWeight: 500 }}>{range === 'today' ? '15-min' : range === 'week' ? '2-hour' : 'daily'}</span>
       </div>
-      <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', marginTop: 8 }}>
+      <div style={{ display: 'flex', gap: 24, alignItems: 'flex-end', marginTop: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span className="nn-num" style={{ fontSize: 40, fontWeight: 700, color: tierColor(peakAvg, dark), lineHeight: 0.9 }}>{peakAvg.toFixed(1)}</span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>peak</span>
@@ -180,10 +195,19 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
           <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', lineHeight: 0.9 }}>{avg.toFixed(1)}</span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>avg</span>
         </div>
+        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)', margin: '2px 0' }} />
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{Math.round(distractPeak * 100)}%</span>
+          <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>distract peak</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span className="nn-num" style={{ fontSize: 22, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{Math.round(distractAvg * 100)}%</span>
+          <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>avg</span>
+        </div>
       </div>
 
       {series.length >= 2 ? (
-        <SessionGraph series={series} dark={dark} avg={avg} bucketSecs={bucketSecs} />
+        <SessionGraph series={series} dark={dark} avg={avg} bucketSecs={bucketSecs} distractAvg={distractAvg} />
       ) : (
         <div style={{ marginTop: 14, fontSize: 12.5, color: 'var(--faint)', lineHeight: 1.5 }}>
           Run more sessions side by side to warm your Nube — color climbs from indigo to gold as you fan out.
