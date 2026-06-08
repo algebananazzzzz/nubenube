@@ -34,7 +34,7 @@ export type RangeKey = 'today' | 'week' | 'month' | 'all'
 
 export type DistractionSlice = { name: string; secs: number }
 
-export type SessionPoint = { label: string; peak: number; avg: number; distractSecs: number; present: boolean; future: boolean }
+export type SessionPoint = { label: string; peak: number; avg: number; distractSecs: number; workSecs?: number; present: boolean; future: boolean }
 
 export type Insights = {
   range: RangeKey
@@ -42,6 +42,7 @@ export type Insights = {
   claudeActiveSecs: number // Claude working
   distractSecs: number // total time on a distraction (honest; matches Home)
   driftSecs: number // drift (distraction while a turn waits)
+  workAppSecs: number // total wall-clock time on a work app over the range
   distractionBreakdown: DistractionSlice[]
   peakSessions: number // max concurrent (running+waiting) over range
   avgSessions: number // time-weighted avg concurrent over engaged time in the range
@@ -73,6 +74,7 @@ export type FocusTick = {
   distractSecsToday: number // today's states 3+4 (on a distraction)
   driftSecsToday: number // today's state 3 only (drifting — Claude waiting + distracted)
   workSecsToday: number // session-weighted Claude-working secs (Σ running·dt)
+  workAppSecsToday: number // today's wall-clock secs on a work app
   monitoredSecsToday: number // present-&-tracking wall-clock (all but away)
   frozen: boolean // meter frozen (away/idle) — pause live UI timers
 }
@@ -94,6 +96,7 @@ export type Sensitivity = {
 
 export type Settings = {
   distractionApps: string[]
+  workApps: string[]
   sensitivity: Sensitivity
   driftMomentIntensity: 'passive' | 'gentle-notification' | 'overlay'
   logRoots: string[]

@@ -93,6 +93,7 @@ export const mockInsights = (range: RangeKey): Insights => {
     claudeActiveSecs: Math.round(2.6 * 3600 * RANGE_MUL[range]),
     distractSecs: Math.round(14 * 60 * RANGE_MUL[range]),
     driftSecs: Math.round(6 * 60 * RANGE_MUL[range]),
+    workAppSecs: Math.round(48 * 60 * RANGE_MUL[range]),
     distractionBreakdown: [
       { name: 'ChatGPT Atlas', secs: Math.round(9 * 60 * RANGE_MUL[range]) },
       { name: 'Telegram', secs: Math.round(5 * 60 * RANGE_MUL[range]) },
@@ -123,6 +124,7 @@ function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
         peak,
         avg: bucketAvg(peak),
         distractSecs,
+        workSecs: present ? Math.round((Math.sin(c / 3) * 0.5 + 0.5) * 600) : 0, // 0..600 of a 900s cell
         present,
         future,
       }
@@ -144,7 +146,7 @@ function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
         const inWin = h0 >= 8 && h0 <= 18
         const peak = present && inWin ? 1 + ((day * 12 + b) % 4) : 0
         const distractSecs = present ? Math.round((Math.sin((day * 12 + b) / 2.2) * 0.5 + 0.5) * 3600 + (b % 6 === 0 ? 1200 : 0)) : 0
-        return { label, peak, avg: bucketAvg(peak), distractSecs, present, future }
+        return { label, peak, avg: bucketAvg(peak), distractSecs, workSecs: present ? Math.round((Math.sin((day * 12 + b) / 2) * 0.5 + 0.5) * 4200) : 0, present, future }
       })
     }).flat()
   }
@@ -163,6 +165,7 @@ function mockSessionSeries(range: RangeKey): Insights['sessionSeries'] {
       peak,
       avg: bucketAvg(peak),
       distractSecs,
+      workSecs: present ? Math.round((Math.sin(day / 2) * 0.5 + 0.5) * 50000) : 0,
       present,
       future,
     }
@@ -178,6 +181,7 @@ export const mockConnection: ConnectionStatus = {
 
 export const mockSettings: Settings = {
   distractionApps: ['ChatGPT Atlas', 'Telegram'],
+  workApps: ['Slack', 'Google Chrome'],
   sensitivity: {
     graceSecs: 30,
     timeToDeathMin: 30,
@@ -226,6 +230,7 @@ export const mockFocusTick: FocusTick = {
   distractSecsToday: 14 * 60,
   driftSecsToday: 6 * 60,
   workSecsToday: Math.round(2.6 * 3600),
+  workAppSecsToday: Math.round(0.8 * 3600),
   monitoredSecsToday: Math.round(3.8 * 3600),
   frozen: false,
 }
