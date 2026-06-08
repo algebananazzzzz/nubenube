@@ -17,11 +17,9 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-latest
-            args: ''
+            args: '--bundles deb,rpm'
           - platform: macos-latest
-            args: '--target universal-apple-darwin'
-          - platform: windows-latest
-            args: ''
+            args: '--target aarch64-apple-darwin'
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +33,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
         with:
