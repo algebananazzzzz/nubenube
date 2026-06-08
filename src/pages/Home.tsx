@@ -89,7 +89,7 @@ function TodayStrip() {
       <div style={{ display: 'flex', gap: 10, marginTop: 13 }}>
         <TimerTile label="Claude working" value={s.work} tone="var(--success)" badge={s.run > 1 ? `×${s.run}` : null} fmt={s.fmtCountdown} />
         <TimerTile label="Distracted" value={s.distracted} tone="var(--warning)" fmt={s.fmtCountdown} />
-        <TimerTile label="Drifted" value={s.drifted} tone="var(--critical)" fmt={s.fmtCountdown} />
+        <TimerTile label="Work apps" value={s.workApp} tone="var(--work)" fmt={s.fmtCountdown} />
       </div>
     </Card>
   )

@@ -72,7 +72,6 @@ export type FocusTick = {
   budgetRatePerMin: number // signed budget-secs gained per min (negative = draining)
   activeSecsToday: number // today's states 1+2+3+4 (engaged or on a distraction)
   distractSecsToday: number // today's states 3+4 (on a distraction)
-  driftSecsToday: number // today's state 3 only (drifting — Claude waiting + distracted)
   workSecsToday: number // session-weighted Claude-working secs (Σ running·dt)
   workAppSecsToday: number // today's wall-clock secs on a work app
   monitoredSecsToday: number // present-&-tracking wall-clock (all but away)

@@ -228,7 +228,6 @@ export const mockFocusTick: FocusTick = {
   budgetRatePerMin: 0, // calm vibing demo — budget steady
   activeSecsToday: Math.round(3.2 * 3600),
   distractSecsToday: 14 * 60,
-  driftSecsToday: 6 * 60,
   workSecsToday: Math.round(2.6 * 3600),
   workAppSecsToday: Math.round(0.8 * 3600),
   monitoredSecsToday: Math.round(3.8 * 3600),

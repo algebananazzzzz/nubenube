@@ -106,7 +106,6 @@ export type NubeState = {
   // live (ticking) "today" totals for the Home timers:
   work: number // session-weighted Claude-working secs (faster with more windows)
   distracted: number // seconds on a distraction
-  drifted: number // seconds drifting (Claude waiting while on a distraction)
   workApp: number // seconds the foreground was a work app today
   mood: Mood
   sky: Sky
@@ -159,14 +158,13 @@ export function useNube(): NubeState {
   const onDistraction = effState === 'drifting' || effState === 'chillin'
   const work = useCountUp(tick.workSecsToday ?? 0, !frozen ? run : 0) // +run/sec
   const distracted = useCountUp(distract, onDistraction ? 1 : 0)
-  const drifted = useCountUp(tick.driftSecsToday ?? 0, effState === 'drifting' ? 1 : 0)
   const workApps = useSettings((st) => st.settings?.workApps) ?? NO_WORK_APPS
   const onWorkApp = !!appName && workApps.some((w) => w.toLowerCase() === appName.toLowerCase())
   const workApp = useCountUp(tick.workAppSecsToday ?? 0, !frozen && onWorkApp ? 1 : 0)
 
   return {
     tick, theme, life, baseline, cap, effState, appName,
-    run, wait, work, distracted, drifted, workApp,
+    run, wait, work, distracted, workApp,
     mood, sky, clay, glow: tier.glow,
     budgetLeft, budgetTotal, fainting,
     fmtClock, fmtCountdown,
