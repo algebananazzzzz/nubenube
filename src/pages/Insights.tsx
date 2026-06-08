@@ -77,10 +77,12 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
   const innerW = W - padL - padR, innerH = H - padT - padB
   const n = series.length
   const fracOf = (p: SessionPoint) => (p.present && bucketSecs > 0 ? Math.min(1, (p.distractSecs ?? 0) / bucketSecs) : 0)
-  const maxBar = Math.max(0.001, ...series.map((p) => p.avg))
+  const workFracOf = (p: SessionPoint) => (p.present && bucketSecs > 0 ? Math.min(1, (p.workSecs ?? 0) / bucketSecs) : 0)
+  const maxBar = Math.max(0.001, ...series.map((p) => p.avg)) // sessions peak → tier color + label
+  const maxUp = Math.max(0.001, ...series.map((p) => p.avg + workFracOf(p))) // stacked: work + sessions
   const maxFrac = Math.max(0, ...series.map(fracOf)) // 0..1
-  const pps = innerH / (maxBar + Math.max(maxFrac, 0.0001)) // shared pixels-per-unit
-  const topH = maxBar * pps
+  const pps = innerH / (maxUp + Math.max(maxFrac, 0.0001)) // shared pixels-per-unit
+  const topH = maxUp * pps
   const botH = innerH - topH
   const centerY = padT + topH
   const baseY = padT + innerH
@@ -121,20 +123,25 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
         </>
       )}
 
-      {/* bars: sessions up (in-progress one breathes) · distraction down · dashed
-          nub at center for gaps · nothing for future/idle. */}
+      {/* bars: work layer (base, indigo) + Claude layer (stacked above) · distraction
+          down (red) · dashed nub at center for gaps · nothing for future/idle. */}
       {series.map((p, i) => {
         if (p.future) return null
         if (!p.present) {
           return <line key={i} x1={left(i)} y1={centerY} x2={left(i) + barW} y2={centerY} stroke="var(--faint)" strokeWidth={2} strokeDasharray="2 3" opacity={0.4} />
         }
-        const sh = Math.min(topH, p.avg * pps)
-        const dh = Math.min(botH, fracOf(p) * pps)
+        const wf = workFracOf(p)
+        const wh = Math.min(topH, wf * pps) // work layer (base, indigo)
+        const sh = Math.min(topH - wh, p.avg * pps) // Claude layer, stacked above work
+        const dh = Math.min(botH, fracOf(p) * pps) // distraction (downward, red)
+        const rx = Math.min(2, barW / 2)
         return (
           <g key={i}>
-            {p.avg > 0 && <rect x={left(i)} y={centerY - sh} width={barW} height={sh} rx={Math.min(2, barW / 2)} fill={sessColor} opacity={0.9}
+            {wh > 0 && <rect x={left(i)} y={centerY - wh} width={barW} height={wh} rx={rx} fill="var(--work)" opacity={0.9} />}
+            {p.avg > 0 && <rect x={left(i)} y={centerY - wh - sh} width={barW} height={sh} rx={rx} fill={sessColor} opacity={0.9}
               style={i === nowIdx ? { animation: 'nn-bar-pulse 1.8s ease-in-out infinite' } : undefined} />}
-            {dh > 0 && <rect x={left(i)} y={centerY} width={barW} height={dh} rx={Math.min(2, barW / 2)} fill="var(--critical)" opacity={0.85} />}
+            {wh > 0 && sh > 0 && <line x1={left(i)} y1={centerY - wh} x2={left(i) + barW} y2={centerY - wh} stroke="var(--surface)" strokeWidth={1} />}
+            {dh > 0 && <rect x={left(i)} y={centerY} width={barW} height={dh} rx={rx} fill="var(--critical)" opacity={0.85} />}
           </g>
         )
       })}
@@ -147,7 +154,7 @@ function SessionGraph({ series, dark, avg, bucketSecs }: { series: SessionPoint[
       {/* per-bucket hover targets */}
       {series.map((p, i) => (
         <rect key={`h${i}`} x={padL + i * cellW} y={padT} width={cellW} height={innerH} fill="transparent">
-          <title>{p.future ? `${p.label} · upcoming` : p.present ? `${p.label} · avg ${p.avg.toFixed(1)} sessions · ${fmtSecs(p.distractSecs ?? 0)} distracted (${fracOf(p).toFixed(2)})` : `${p.label} · no data`}</title>
+          <title>{p.future ? `${p.label} · upcoming` : p.present ? `${p.label} · avg ${p.avg.toFixed(1)} sessions · ${fmtSecs(p.workSecs ?? 0)} work · ${fmtSecs(p.distractSecs ?? 0)} distracted (${fracOf(p).toFixed(2)})` : `${p.label} · no data`}</title>
         </rect>
       ))}
     </svg>
@@ -164,8 +171,10 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
   // (honest day_stats totals, matching Home + the breakdown card).
   const claudingSecs = insights.claudeActiveSecs ?? 0
   const distractTotal = insights.distractSecs ?? 0
+  const workAppTotal = insights.workAppSecs ?? 0
   const [claudingN, claudingU] = durParts(claudingSecs)
   const [distractN, distractU] = durParts(distractTotal)
+  const [workN, workU] = durParts(workAppTotal)
   // wall-clock seconds one bar spans, for the distraction-share denominator.
   const bucketSecs = range === 'today' ? 15 * 60 : range === 'week' ? 2 * 3600 : 24 * 3600
   return (
@@ -182,6 +191,10 @@ function SessionsCard({ insights, range, dark }: { insights: InsightsData; range
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', lineHeight: 0.9 }}>{claudingN}<span style={{ fontSize: 15 }}>{claudingU}</span></span>
           <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>clauding</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--work)', lineHeight: 0.9 }}>{workN}<span style={{ fontSize: 15 }}>{workU}</span></span>
+          <span style={{ fontSize: 13, color: 'var(--faint)', fontWeight: 600 }}>work apps</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span className="nn-num" style={{ fontSize: 28, fontWeight: 700, color: 'var(--critical)', lineHeight: 0.9 }}>{distractN}<span style={{ fontSize: 15 }}>{distractU}</span></span>
