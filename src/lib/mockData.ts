@@ -190,6 +190,7 @@ export const mockSettings: Settings = {
   logRoots: [],
   notificationSoundName: null,
   notificationSoundPath: null,
+  keepAwake: false,
 }
 
 // auto-discovered apps surfaced by the Settings "scan" (browser/dev fallback)

@@ -73,6 +73,10 @@ pub struct DriftRuntime {
     settings_cache: Option<(std::time::SystemTime, settings::Settings)>,
     // last life persisted to the DB; lets frozen/steady ticks skip the write.
     last_saved_life: f64,
+    // keep-display-awake controller (owns the OS assertion on its own thread) +
+    // the last state we sent it, so we only signal on an on/off edge.
+    awake: crate::awake::AwakeController,
+    awake_on: bool,
 }
 
 /// Summarize waiting sessions given each one's (project_id, elapsed_secs):
@@ -196,6 +200,8 @@ impl DriftRuntime {
             work_app_secs: 0,
             settings_cache: None,
             last_saved_life: -1.0, // impossible value → first tick persists
+            awake: crate::awake::AwakeController::new(),
+            awake_on: false,
         };
         if let Ok(conn) = db::open(&rt.db_path) {
             let (life, day) = db::load_life(&conn);
@@ -350,6 +356,14 @@ impl DriftRuntime {
             .values()
             .filter(|s| s.phase == SessionPhase::Running)
             .count() as i64;
+
+        // Hold the display awake while ≥1 session is actively running (opt-in).
+        // Signal only on an edge so we don't spam the channel every 2s tick.
+        let want_awake = s.keep_awake && running_count > 0;
+        if want_awake != self.awake_on {
+            self.awake.set(want_awake);
+            self.awake_on = want_awake;
+        }
 
         let idle = snap.idle_secs > s.sensitivity.idle_threshold_secs as u64;
         let frozen = idle;

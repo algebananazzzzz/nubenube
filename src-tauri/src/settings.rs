@@ -68,6 +68,9 @@ pub struct Settings {
     pub log_roots: Vec<String>,
     pub notification_sound_name: Option<String>,
     pub notification_sound_path: Option<String>,
+    /// Keep the display/system awake while a Claude session is actively running.
+    /// Opt-in: off by default since it overrides the OS sleep policy.
+    pub keep_awake: bool,
 }
 
 impl Default for Settings {
@@ -85,6 +88,7 @@ impl Default for Settings {
                 .collect(),
             notification_sound_name: None,
             notification_sound_path: None,
+            keep_awake: false,
         }
     }
 }

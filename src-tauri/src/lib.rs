@@ -3,6 +3,7 @@
 #![allow(unexpected_cfgs)]
 // Nube Nube — native (Rust) entry point.
 
+mod awake;
 mod commands;
 mod connector;
 mod db;

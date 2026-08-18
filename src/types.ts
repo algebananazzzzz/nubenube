@@ -100,6 +100,7 @@ export type Settings = {
   logRoots: string[]
   notificationSoundName: string | null
   notificationSoundPath: string | null
+  keepAwake: boolean // keep the display awake while a Claude session is running
 }
 
 export type KnownApp = { name: string; lastSeen: string }

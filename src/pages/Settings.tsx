@@ -351,8 +351,11 @@ export function Settings() {
             <PrefRow title="Theme" desc="Configure your preferred theme.">
               <SegTabs<Theme> tabs={[{ key: 'dark', label: 'Dark' }, { key: 'light', label: 'Light' }]} value={theme} onChange={(v) => setPref('theme', v)} size="sm" />
             </PrefRow>
-            <PrefRow title="Desktop companion" desc="A floating widget that watches over you." last>
+            <PrefRow title="Desktop companion" desc="A floating widget that watches over you.">
               <Toggle on={companion} onChange={(v) => setPref('companion', v)} />
+            </PrefRow>
+            <PrefRow title="Keep display awake" desc="Stops your screen and Mac from sleeping while Claude is actively working." last>
+              <Toggle on={!!settings.keepAwake} onChange={(v) => void save({ keepAwake: v })} />
             </PrefRow>
           </Card>
 

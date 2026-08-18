@@ -47,6 +47,10 @@ anyhow = "1"
 active-win-pos-rs = "0.11"
 user-idle = "0.6"
 
+# Keep the display/system awake while Claude is actively working (opt-in). Pure
+# Rust, cross-platform (macOS IOKit, Linux ScreenSaver/systemd-inhibit via D-Bus).
+keepawake = "0.6"
+
 # macOS: native NSWindow tweaks for the companion overlay — float over full-screen
 # apps + all Spaces (fullScreenAuxiliary) and drag by the window background.
 [target.'cfg(target_os = "macos")'.dependencies]
