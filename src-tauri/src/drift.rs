@@ -104,7 +104,7 @@ fn waiting_load(
 }
 
 /// Net budget rate (%-points/min). Drain hits on ANY distraction at base rate
-/// `R = baseline / budget_min`; a turn waiting on you multiplies the drain by
+/// `R = BASELINE / budget_min`; a turn waiting on you multiplies the drain by
 /// `multiplier`. HEAL = `ratio·R` per heal unit, where heal units = running
 /// windows + 1 while the foreground is a work app (the +1x reward, stacks). Pure.
 pub fn life_rate(
@@ -112,12 +112,11 @@ pub fn life_rate(
     waiting: bool,
     running: i64,
     on_work_app: bool,
-    baseline: f64,
     budget_min: f64,
     ratio: f64,
     multiplier: f64,
 ) -> f64 {
-    let r = baseline / budget_min;
+    let r = BASELINE / budget_min;
     let heal = ratio * r * (running + on_work_app as i64) as f64;
     let drain = if on_distraction {
         r * if waiting { multiplier } else { 1.0 }
@@ -376,7 +375,7 @@ impl DriftRuntime {
         let (budget_min, ratio) = settings::effective_rates(&s.sensitivity, weekday);
         let multiplier = s.sensitivity.waiting_multiplier.max(1.0);
         let waiting = waiting_count > 0; // past grace → X× escalation
-        let rate = life_rate(on_distraction, waiting, running_count, on_work_app, BASELINE, budget_min, ratio, multiplier);
+        let rate = life_rate(on_distraction, waiting, running_count, on_work_app, budget_min, ratio, multiplier);
         // drifting is positional: on a distraction while a turn waits past grace.
         let drifting = !frozen && on_distraction && waiting;
         let budget_total_secs = (budget_min * 60.0).round() as i64;
@@ -416,28 +415,24 @@ impl DriftRuntime {
         // `active` = engaged time only (a session running/waiting, or on a
         // distraction), so idle minutes don't inflate it; focused = active − distract.
         let engaged = running_count > 0 || waiting_total > 0;
-        let active_delta = if !frozen && (on_distraction || engaged) { dts } else { 0 };
-        let distract_delta = if !frozen && on_distraction { dts } else { 0 };
-        // `drift` = wall-clock drifting (distraction while a turn waits past grace);
-        // `drifting` already implies !frozen.
-        let drift_delta = if drifting { dts } else { 0 };
-        // `work` is session-weighted (Σ running·dt); `monitored` is all tracked time.
-        let work_delta = if !frozen { dts * running_count } else { 0 };
-        let monitored_delta = if !frozen { dts } else { 0 };
-        let work_app_delta = if !frozen && on_work_app { dts } else { 0 };
-        let stats_delta = active_delta > 0
-            || distract_delta > 0
-            || drift_delta > 0
-            || work_delta > 0
-            || monitored_delta > 0
-            || work_app_delta > 0;
-        if stats_delta {
-            self.active_secs += active_delta;
-            self.distract_secs += distract_delta;
-            self.drift_secs += drift_delta;
-            self.work_secs += work_delta;
-            self.monitored_secs += monitored_delta;
-            self.work_app_secs += work_app_delta;
+        let delta = db::DayStatsDelta {
+            active: if !frozen && (on_distraction || engaged) { dts } else { 0 },
+            distract: if !frozen && on_distraction { dts } else { 0 },
+            // `drift` = wall-clock drifting (distraction while a turn waits past
+            // grace); `drifting` already implies !frozen.
+            drift: if drifting { dts } else { 0 },
+            // `work` is session-weighted (Σ running·dt); `monitored` is all tracked time.
+            work: if !frozen { dts * running_count } else { 0 },
+            monitored: if !frozen { dts } else { 0 },
+            work_app: if !frozen && on_work_app { dts } else { 0 },
+        };
+        if !delta.is_empty() {
+            self.active_secs += delta.active;
+            self.distract_secs += delta.distract;
+            self.drift_secs += delta.drift;
+            self.work_secs += delta.work;
+            self.monitored_secs += delta.monitored;
+            self.work_app_secs += delta.work_app;
         }
 
         // Every write this tick (per-app distraction, day totals, hourly
@@ -454,30 +449,19 @@ impl DriftRuntime {
             if let Ok(tx) = c.transaction() {
                 // Per-app Insights breakdown = TOTAL time on a distraction app
                 // (not just drift), so it reflects all distraction, waiting or not.
-                if distract_delta > 0 {
-                    db::add_drift_by_app(&tx, &today, &snap.app_name, distract_delta);
+                if delta.distract > 0 {
+                    db::add_drift_by_app(&tx, &today, &snap.app_name, delta.distract);
                 }
-                if stats_delta {
-                    db::add_day_stats(
-                        &tx,
-                        &reset_day,
-                        active_delta,
-                        distract_delta,
-                        drift_delta,
-                        work_delta,
-                        monitored_delta,
-                        work_app_delta,
-                    );
-                }
+                db::add_day_stats(&tx, &reset_day, &delta);
                 // Mark this 5-min slot present (app running) so the graph shows a
                 // gap for slots it wasn't, instead of a misleading zero.
                 let slot = (now_local.hour() as i64 * 60 + now_local.minute() as i64) / 5;
                 db::mark_session_slot(&tx, &today, slot);
-                if distract_delta > 0 {
-                    db::add_distract_sample(&tx, &today, slot, distract_delta);
+                if delta.distract > 0 {
+                    db::add_distract_sample(&tx, &today, slot, delta.distract);
                 }
-                if work_app_delta > 0 {
-                    db::add_work_sample(&tx, &today, slot, work_app_delta);
+                if delta.work_app > 0 {
+                    db::add_work_sample(&tx, &today, slot, delta.work_app);
                 }
                 if !frozen {
                     let total_sessions = running_count + waiting_total;
@@ -619,56 +603,56 @@ mod tests {
     #[test]
     fn base_drain_on_any_distraction() {
         // On a distraction, nothing waiting → 1× → −R.
-        let r = life_rate(true, false, 0, false, BASELINE, T, RATIO, X);
+        let r = life_rate(true, false, 0, false, T, RATIO, X);
         assert!((r - (-R)).abs() < 1e-9);
     }
 
     #[test]
     fn waiting_turn_multiplies_drain() {
         // On a distraction + a waiting turn → X× → −X·R.
-        let r = life_rate(true, true, 0, false, BASELINE, T, RATIO, X);
+        let r = life_rate(true, true, 0, false, T, RATIO, X);
         assert!((r - (-X * R)).abs() < 1e-9);
     }
 
     #[test]
     fn no_drain_off_distraction() {
         // Not on a distraction → no drain, even with a waiting turn.
-        assert_eq!(life_rate(false, true, 0, false, BASELINE, T, RATIO, X), 0.0);
+        assert_eq!(life_rate(false, true, 0, false, T, RATIO, X), 0.0);
     }
 
     #[test]
     fn heal_when_running_regardless_of_foreground() {
         // One running window heals ratio·R whether or not the foreground is a
         // distraction (on a distraction it nets against the base drain).
-        let on = life_rate(true, false, 1, false, BASELINE, T, RATIO, X);
+        let on = life_rate(true, false, 1, false, T, RATIO, X);
         assert!((on - (RATIO * R - R)).abs() < 1e-9);
-        let off = life_rate(false, false, 1, false, BASELINE, T, RATIO, X);
+        let off = life_rate(false, false, 1, false, T, RATIO, X);
         assert!((off - RATIO * R).abs() < 1e-9);
     }
 
     #[test]
     fn enough_running_outpaces_base_drain() {
         // Many running windows out-heal a 1× distraction → net positive.
-        let r = life_rate(true, false, 20, false, BASELINE, T, RATIO, X);
+        let r = life_rate(true, false, 20, false, T, RATIO, X);
         assert!(r > 0.0);
     }
 
     #[test]
     fn budget_rate_is_one_min_per_min_at_base() {
         // 1× distraction loses exactly 60 budget-secs/min; X× loses X·60.
-        let one = life_rate(true, false, 0, false, BASELINE, T, RATIO, X);
+        let one = life_rate(true, false, 0, false, T, RATIO, X);
         assert!((budget_rate_per_min(one, BASELINE, T) - (-60.0)).abs() < 1e-9);
-        let x = life_rate(true, true, 0, false, BASELINE, T, RATIO, X);
+        let x = life_rate(true, true, 0, false, T, RATIO, X);
         assert!((budget_rate_per_min(x, BASELINE, T) - (-60.0 * X)).abs() < 1e-9);
     }
 
     #[test]
     fn work_app_heals_like_one_running() {
         // On a work app with no Claude sessions still heals at ratio·R (the +1x reward).
-        let solo = life_rate(false, false, 0, true, BASELINE, T, RATIO, X);
+        let solo = life_rate(false, false, 0, true, T, RATIO, X);
         assert!((solo - RATIO * R).abs() < 1e-9);
         // Stacks: work app + 2 running windows = 3× heal.
-        let stacked = life_rate(false, false, 2, true, BASELINE, T, RATIO, X);
+        let stacked = life_rate(false, false, 2, true, T, RATIO, X);
         assert!((stacked - 3.0 * RATIO * R).abs() < 1e-9);
     }
 
@@ -677,7 +661,7 @@ mod tests {
     #[test]
     fn apply_life_drains_over_dt() {
         // 1× distraction for 60s → −R points.
-        let rate = life_rate(true, false, 0, false, BASELINE, T, RATIO, X);
+        let rate = life_rate(true, false, 0, false, T, RATIO, X);
         let life = apply_life(BASELINE, 60.0, rate, false);
         assert!((life - (BASELINE - R)).abs() < 1e-9);
     }

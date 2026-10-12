@@ -53,8 +53,10 @@ mod tests {
 
     #[test]
     fn exact_match_only_no_substring_false_positive() {
-        let mut s = Settings::default();
-        s.distraction_apps = vec!["X".into(), "Discord".into()];
+        let s = Settings {
+            distraction_apps: vec!["X".into(), "Discord".into()],
+            ..Settings::default()
+        };
         assert!(matches!(classify("Discord", &s), AppClass::Distraction));
         assert!(matches!(classify("X", &s), AppClass::Distraction));
         // the old substring bug: "X" must NOT match "Xcode"
@@ -64,9 +66,11 @@ mod tests {
 
     #[test]
     fn work_apps_classify_as_work_distraction_wins_ties() {
-        let mut s = Settings::default();
-        s.work_apps = vec!["Visual Studio Code".into(), "Google Chrome".into()];
-        s.distraction_apps = vec!["Telegram".into(), "Google Chrome".into()];
+        let s = Settings {
+            work_apps: vec!["Visual Studio Code".into(), "Google Chrome".into()],
+            distraction_apps: vec!["Telegram".into(), "Google Chrome".into()],
+            ..Settings::default()
+        };
         assert!(matches!(classify("Visual Studio Code", &s), AppClass::Work));
         assert!(matches!(classify("Telegram", &s), AppClass::Distraction));
         // app in BOTH lists → distraction wins (matches classify precedence)

@@ -146,8 +146,10 @@ mod tests {
 
     #[test]
     fn effective_rates_prefers_override_then_base() {
-        let mut s = Sensitivity::default();
-        s.day_overrides = vec![DayOverride { weekday: 5, time_to_death_min: 60.0, heal_drain_ratio: 0.25 }];
+        let s = Sensitivity {
+            day_overrides: vec![DayOverride { weekday: 5, time_to_death_min: 60.0, heal_drain_ratio: 0.25 }],
+            ..Sensitivity::default()
+        };
         assert_eq!(effective_rates(&s, 5), (60.0, 0.25)); // Saturday → override
         assert_eq!(effective_rates(&s, 0), (s.time_to_death_min, s.heal_drain_ratio)); // Monday → base
     }

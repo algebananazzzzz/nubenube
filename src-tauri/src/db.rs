@@ -239,19 +239,29 @@ pub fn add_drift_by_app(conn: &Connection, day: &str, app_name: &str, secs: i64)
     );
 }
 
-/// Add to today's activity totals (all deltas in seconds; an all-zero call is a
-/// no-op). See the `day_stats` schema for what each column means.
-pub fn add_day_stats(
-    conn: &Connection,
-    day: &str,
-    active_delta: i64,
-    distract_delta: i64,
-    drift_delta: i64,
-    work_delta: i64,
-    monitored_delta: i64,
-    work_app_delta: i64,
-) {
-    if active_delta <= 0 && distract_delta <= 0 && drift_delta <= 0 && work_delta <= 0 && monitored_delta <= 0 && work_app_delta <= 0 {
+/// Seconds to add to one day's activity totals. See the `day_stats` schema for
+/// what each column means.
+#[derive(Default)]
+pub struct DayStatsDelta {
+    pub active: i64,
+    pub distract: i64,
+    pub drift: i64,
+    pub work: i64,
+    pub monitored: i64,
+    pub work_app: i64,
+}
+
+impl DayStatsDelta {
+    pub fn is_empty(&self) -> bool {
+        [self.active, self.distract, self.drift, self.work, self.monitored, self.work_app]
+            .iter()
+            .all(|&d| d <= 0)
+    }
+}
+
+/// Add to a day's activity totals; an empty delta is a no-op.
+pub fn add_day_stats(conn: &Connection, day: &str, d: &DayStatsDelta) {
+    if d.is_empty() {
         return;
     }
     let _ = conn.execute(
@@ -266,12 +276,12 @@ pub fn add_day_stats(
             work_app_secs  = work_app_secs + ?7",
         params![
             day,
-            active_delta.max(0),
-            distract_delta.max(0),
-            drift_delta.max(0),
-            work_delta.max(0),
-            monitored_delta.max(0),
-            work_app_delta.max(0)
+            d.active.max(0),
+            d.distract.max(0),
+            d.drift.max(0),
+            d.work.max(0),
+            d.monitored.max(0),
+            d.work_app.max(0)
         ],
     );
 }
