@@ -30,6 +30,16 @@ use drift::DriftRuntime;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // GTK3's Wayland backend has no protocol for keep-above, sticky, or client
+    // positioning, so the companion would open wherever the compositor drops it
+    // (usually under the main window) and stay on one workspace. XWayland honors
+    // _NET_WM_STATE_ABOVE/STICKY and set_position. Must run before GTK init; an
+    // explicit GDK_BACKEND from the user still wins.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GDK_BACKEND").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
+
     tauri::Builder::default()
         // Single-instance MUST be first: focus the running window.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
