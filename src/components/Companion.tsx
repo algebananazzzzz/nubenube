@@ -70,7 +70,7 @@ function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: 
       animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
     }}>
       {/* draggable creature header */}
-      <div data-tauri-drag-region style={{ position: 'relative', cursor: 'grab', height: 92, borderBottom: '1px solid var(--line-faint)' }}>
+      <div data-tauri-drag-region="deep" style={{ position: 'relative', cursor: 'grab', height: 92, borderBottom: '1px solid var(--line-faint)' }}>
         <Sky sky={s.sky} style={{ position: 'absolute', inset: 0 }}>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
             <Nube mood={s.mood} size={74} glow={s.glow} />
@@ -114,7 +114,7 @@ function CompanionMini({ s, onExpand, innerRef }: { s: NubeState; onExpand: () =
   const cdTone = s.life < 30 ? 'var(--critical)' : 'var(--warning)'
   return (
     // inline-flex → the pill is exactly as wide as its content (no trailing gap)
-    <div ref={innerRef} data-tauri-drag-region title={st.label} style={{
+    <div ref={innerRef} data-tauri-drag-region="deep" title={st.label} style={{
       display: 'inline-flex', alignItems: 'center', gap: 9, height: 44, padding: '0 14px 0 6px',
       borderRadius: 'var(--r-pill)', background: 'var(--surface)',
       border: '1px solid var(--line)', cursor: 'grab', userSelect: 'none', whiteSpace: 'nowrap',
