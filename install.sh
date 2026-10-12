@@ -1,40 +1,84 @@
 #!/usr/bin/env bash
-# Build NubeNube from source and install it to /Applications (macOS).
-# Local install only — skips the updater-artifact signing (no signing key
-# needed). For a shareable installer build a dmg instead (see end of file).
+# Install the latest stable NubeNube release: the .deb through apt on
+# Debian/Ubuntu, the .app into /Applications on macOS. Downloads the prebuilt
+# image, so it needs no Rust, Node or -dev packages. For a source checkout,
+# `make install` sets up the build dependencies instead.
 set -euo pipefail
 
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 APP_NAME="Nube Nube"
-SRC="src-tauri/target/release/bundle/macos/${APP_NAME}.app"
-DEST="/Applications/${APP_NAME}.app"
+# The updater manifest of the latest non-prerelease, keyed by platform.
+MANIFEST_URL="https://github.com/algebananazzzzz/nubenube/releases/latest/download/latest.json"
 
-echo "==> Installing JS dependencies"
-npm install
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
 
-echo "==> Building ${APP_NAME} (release) — this compiles Rust, give it a few minutes"
-# --bundles app: only the .app (skip dmg). The inline config turns off updater
-# artifacts so the build doesn't demand TAURI_SIGNING_PRIVATE_KEY.
-npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+# latest.json is pretty-printed by tauri-action: each platform key opens an
+# object whose "url" line follows a "signature" line.
+asset_url() {
+  local url
+  url=$(awk -v key="\"$1\": {" 'index($0, key) { f = 1 } f && /"url"/ { gsub(/.*"url": *"|".*/, ""); print; exit }' "$tmp/latest.json")
+  [ -n "$url" ] || { echo "!! The latest release has no $1 build." >&2; exit 1; }
+  echo "$url"
+}
 
-[ -d "$SRC" ] || { echo "!! Build artifact missing: $SRC" >&2; exit 1; }
+install_linux() {
+  [ "$(uname -m)" = x86_64 ] || { echo "!! Releases ship x86_64 Linux builds only." >&2; exit 1; }
+  command -v apt-get >/dev/null 2>&1 || {
+    echo "!! Only Debian/Ubuntu is automated. Grab the .rpm from the releases page instead." >&2
+    exit 1
+  }
+  local url deb
+  url=$(asset_url linux-x86_64-deb)
+  deb="$tmp/$(basename "$url")"
 
-echo "==> Quitting any running instance"
-osascript -e "quit app \"${APP_NAME}\"" 2>/dev/null || true
-pkill -f "${DEST}" 2>/dev/null || true
-sleep 1
+  echo "==> Downloading $url"
+  curl -fL --progress-bar -o "$deb" "$url"
 
-echo "==> Installing to ${DEST}"
-rm -rf "$DEST"
-cp -R "$SRC" "$DEST"
-# Strip the quarantine flag so Gatekeeper doesn't block an unsigned local build.
-xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+  echo "==> Quitting any running instance"
+  pkill -x nubenube 2>/dev/null || true
 
-echo "==> Launching"
-open "$DEST"
-echo "Done. Installed $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$DEST/Contents/Info.plist" 2>/dev/null || echo '?') to $DEST"
+  echo "==> Installing (apt pulls in the runtime libraries)"
+  # apt reads the file as the _apt user, which can't enter a mktemp dir.
+  chmod 755 "$tmp"
+  # --reinstall so rerunning on the same version still replaces the binary.
+  sudo apt-get install -y --reinstall "$deb"
 
-# For a shareable installer instead of installing locally, run:
-#   npm run tauri build -- --bundles dmg --config '{"bundle":{"createUpdaterArtifacts":false}}'
-# → src-tauri/target/release/bundle/dmg/Nube Nube_<version>_<arch>.dmg
+  echo "==> Launching"
+  setsid nubenube >/dev/null 2>&1 < /dev/null &
+  echo "Done. Installed $(dpkg-query -W -f='${Package} ${Version}' "$(dpkg-deb -f "$deb" Package)")"
+}
+
+install_macos() {
+  local arch url dest="/Applications/${APP_NAME}.app"
+  arch=$(uname -m)
+  [ "$arch" = arm64 ] && arch=aarch64
+  url=$(asset_url "darwin-${arch}-app")
+
+  echo "==> Downloading $url"
+  curl -fL --progress-bar -o "$tmp/app.tar.gz" "$url"
+  tar -xzf "$tmp/app.tar.gz" -C "$tmp"
+  [ -d "$tmp/${APP_NAME}.app" ] || { echo "!! Archive did not contain ${APP_NAME}.app" >&2; exit 1; }
+
+  echo "==> Quitting any running instance"
+  osascript -e "quit app \"${APP_NAME}\"" 2>/dev/null || true
+  pkill -f "${dest}" 2>/dev/null || true
+  sleep 1
+
+  echo "==> Installing to ${dest}"
+  rm -rf "$dest"
+  cp -R "$tmp/${APP_NAME}.app" "$dest"
+  # The release is unsigned; without this Gatekeeper refuses to open it.
+  xattr -dr com.apple.quarantine "$dest" 2>/dev/null || true
+
+  echo "==> Launching"
+  open "$dest"
+  echo "Done. Installed $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$dest/Contents/Info.plist") to $dest"
+}
+
+curl -fsSL -o "$tmp/latest.json" "$MANIFEST_URL"
+
+case "$(uname -s)" in
+  Linux) install_linux ;;
+  Darwin) install_macos ;;
+  *) echo "!! Unsupported OS: $(uname -s)" >&2; exit 1 ;;
+esac
