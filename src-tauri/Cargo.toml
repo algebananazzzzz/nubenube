@@ -55,3 +55,8 @@ keepawake = "0.6"
 # apps + all Spaces (fullScreenAuxiliary) and drag by the window background.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
+
+# Linux: idle time from GNOME's Mutter IdleMonitor, which works on Wayland where
+# XScreenSaver (user-idle's X11 backend) does not.
+[target.'cfg(target_os = "linux")'.dependencies]
+dbus = "0.9"

@@ -2855,6 +2855,7 @@ dependencies = [
  "active-win-pos-rs",
  "anyhow",
  "chrono",
+ "dbus",
  "dirs 5.0.1",
  "keepawake",
  "log",
