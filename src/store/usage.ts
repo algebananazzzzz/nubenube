@@ -15,6 +15,7 @@ type UsageState = {
   setRange: (r: RangeKey) => Promise<void>
   refreshInsights: () => Promise<void>
   rescan: () => Promise<void>
+  setHooks: (install: boolean) => Promise<void>
 }
 
 export const useUsage = create<UsageState>((set, get) => ({
@@ -60,5 +61,9 @@ export const useUsage = create<UsageState>((set, get) => ({
     const c = await api.rescanLogs()
     set({ connection: c.data })
     await get().loadAll()
+  },
+  setHooks: async (install) => {
+    const c = await (install ? api.installHooks() : api.uninstallHooks())
+    set({ connection: c.data })
   },
 }))

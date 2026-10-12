@@ -208,6 +208,9 @@ export function Settings() {
   const settingsLoaded = useSettings((s) => s.loaded)
   const connection = useUsage((s) => s.connection)
   const rescan = useUsage((s) => s.rescan)
+  const setHooks = useUsage((s) => s.setHooks)
+  // `connected` only means a Claude log dir exists; tracking also needs the hook.
+  const hooked = !!connection?.connected && !!connection?.hooksInstalled
   const theme = usePrefs((s) => s.theme)
   const sound = usePrefs((s) => s.sound)
   const chimeVoice = usePrefs((s) => s.chimeVoice)
@@ -333,12 +336,14 @@ export function Settings() {
         {/* RIGHT — the app: connection, appearance, sound, maintenance */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card pad={20}>
-            <SectionTitle right={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600, color: connection?.connected ? 'var(--success)' : 'var(--faint)' }}><Dot tone={connection?.connected ? 'var(--success)' : 'var(--faint)'} size={7} pulse={connection?.connected} /> {connection?.connected ? 'Connected' : 'Not connected'}</span>}>
+            <SectionTitle right={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600, color: hooked ? 'var(--success)' : 'var(--faint)' }}><Dot tone={hooked ? 'var(--success)' : 'var(--faint)'} size={7} pulse={hooked} /> {hooked ? 'Connected' : connection?.connected ? 'Hook not installed' : 'Not connected'}</span>}>
               Claude Code
             </SectionTitle>
             <div className="nn-mono" style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 14 }}>{connection?.projectsDetected ?? 0} projects · {(connection?.sessionsScanned ?? 0).toLocaleString()} sessions scanned</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Btn variant="line" size="sm" onClick={() => void api.uninstallHooks()}>Remove hook</Btn>
+              {connection?.hooksInstalled
+                ? <Btn variant="line" size="sm" onClick={() => void setHooks(false)}>Remove hook</Btn>
+                : <Btn variant="primary" size="sm" onClick={() => void setHooks(true)}>Install hook</Btn>}
               <Btn variant="soft" size="sm" onClick={() => void rescan()}>Rescan logs</Btn>
             </div>
             <div style={{ fontSize: 12, color: 'var(--faint)', lineHeight: 1.5, marginTop: 14 }}>
