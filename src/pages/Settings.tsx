@@ -1,435 +1,62 @@
-// Settings: Rust-backed config (distraction apps, sensitivity sliders, reset,
-// Claude Code connection) + localStorage prefs (theme, sound, companion).
+// Settings: appearance, companion, chimes, updates. The economy's numbers live
+// on the Rules page.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useSettings } from '../store/settings'
-import { useUsage } from '../store/usage'
-import { usePrefs, type Theme, type UpdateChannel } from '../store/prefs'
-import { api } from '../lib/api'
+import { useState } from 'react'
 import { checkForUpdates } from '../lib/updater'
-import { armChimeUnlock, playChime, CHIME_VOICES, type ChimeVoice } from '../lib/chime'
-import { Card, Pill, Btn, Dot, Toggle, SegTabs } from '../components/ui'
+import { CHIME_VOICES, playChime, type ChimeVoice } from '../lib/chime'
+import { usePrefs, type Theme, type UpdateChannel } from '../store/prefs'
+import { Btn, Card, Pill, PrefRow, SegTabs, Section, Slider, Toggle } from '../components/ui'
 import { version } from '../../package.json'
-import type { Settings as SettingsT, Sensitivity, DayOverride } from '../types'
-
-const VOICE_LABEL: Record<ChimeVoice, string> = {
-  bell: 'Bell', marimba: 'Marimba', chord: 'Chord', koto: 'Koto', blip: 'Blip',
-}
-
-const BRAND: Record<string, string> = {
-  'chatgpt atlas': '#10a37f', telegram: '#2aabee', claude: '#d97757', electron: '#8a6dff',
-  finder: '#3dc7a0', ghostty: '#e0584f', 'google chrome': '#46a35e', slack: '#7a3b86',
-}
-function colorFor(name: string): string {
-  const k = name.toLowerCase()
-  if (BRAND[k]) return BRAND[k]
-  let h = 0
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360
-  return `hsl(${h} 55% 52%)`
-}
-
-function AppAvatar({ name, color }: { name: string; color: string }) {
-  return (
-    <div style={{ width: 34, height: 34, borderRadius: 'var(--r-sm)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: color, color: '#fff', fontWeight: 700, fontSize: 15 }}>
-      {name[0]?.toUpperCase() ?? '?'}
-    </div>
-  )
-}
-
-type AppClassKey = 'distraction' | 'neutral' | 'work'
-
-// Tri-state app-class switch styled as a sliding toggle: a neutral track with a
-// single colored thumb that slides to left/center/right — distraction (red) ·
-// neutral (gray) · work (indigo). Only the thumb carries color; position + color
-// carry the meaning, no text labels. Hover title names the state for affordance.
-const CLASS_ORDER: { key: AppClassKey; tone: string; title: string }[] = [
-  { key: 'distraction', tone: 'var(--critical)', title: 'Distraction' },
-  { key: 'neutral', tone: 'var(--faint)', title: 'Neutral' },
-  { key: 'work', tone: 'var(--work)', title: 'Work' },
-]
-function ClassSwitch({ value, onChange }: { value: AppClassKey; onChange: (v: AppClassKey) => void }) {
-  const CELL = 28, H = 18, PAD = 3
-  const idx = Math.max(0, CLASS_ORDER.findIndex((c) => c.key === value))
-  return (
-    <div style={{ position: 'relative', display: 'inline-flex', padding: PAD, background: 'var(--surface-strong)', borderRadius: 'var(--r-md)', flexShrink: 0 }}>
-      {/* sliding thumb — the only colored element; takes the active state's tone */}
-      <div aria-hidden style={{
-        position: 'absolute', top: PAD, left: PAD + idx * CELL, width: CELL, height: H,
-        borderRadius: 'var(--r-sm)', background: CLASS_ORDER[idx].tone, boxShadow: 'var(--shadow-sm)',
-        transition: 'left .2s var(--ease), background .2s var(--ease)',
-      }} />
-      {CLASS_ORDER.map(({ key, title }) => (
-        <button key={key} type="button" onClick={() => onChange(key)} title={title} aria-label={title} aria-pressed={key === value} className="nn-ui"
-          style={{ position: 'relative', zIndex: 1, width: CELL, height: H, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }} />
-      ))}
-    </div>
-  )
-}
-
-function AppRow({ name, value, onChange, last }: { name: string; value: AppClassKey; onChange: (v: AppClassKey) => void; last?: boolean }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 2px', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
-      <AppAvatar name={name} color={colorFor(name)} />
-      <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-      <ClassSwitch value={value} onChange={onChange} />
-    </div>
-  )
-}
-
-function SliderRow({ title, value, fmt, min, max, step, onChange, accent, last }: {
-  title: string; value: number; fmt: (v: number) => string; min: number; max: number; step: number
-  onChange: (v: number) => void; accent: string; last?: boolean
-}) {
-  const pct = ((value - min) / (max - min)) * 100
-  return (
-    <div style={{ padding: '14px 0', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', flexShrink: 0 }}>{title}</div>
-        <div className="nn-num" style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--faint)', textAlign: 'right' }}>{fmt(value)}</div>
-      </div>
-      <div style={{ position: 'relative', height: 16 }}>
-        <div style={{ position: 'absolute', top: 6, left: 0, right: 0, height: 4, borderRadius: 999, background: 'var(--surface-strong)' }} />
-        <div style={{ position: 'absolute', top: 6, left: 0, width: `${pct}%`, height: 4, borderRadius: 999, background: accent }} />
-        <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(+e.target.value)}
-          className="nn-bare-range"
-          style={{ position: 'absolute', inset: '-3px 0', width: '100%', height: 22, margin: 0, cursor: 'pointer' }} />
-        <div style={{ position: 'absolute', top: '50%', left: `${pct}%`, width: 16, height: 16, marginLeft: -8, transform: 'translateY(-50%)', borderRadius: '50%', background: '#fff', border: `2px solid ${accent}`, boxShadow: 'var(--shadow-sm)', pointerEvents: 'none' }} />
-      </div>
-    </div>
-  )
-}
-
-function PrefRow({ title, desc, children, last }: { title: string; desc?: ReactNode; children: ReactNode; last?: boolean }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '13px 0', borderBottom: last ? 'none' : '1px solid var(--line-faint)' }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
-        {desc && <div style={{ fontSize: 12.5, color: 'var(--faint)', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>}
-      </div>
-      <div style={{ flexShrink: 0 }}>{children}</div>
-    </div>
-  )
-}
-
-function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-      <div className="nn-disp" style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', flex: 1 }}>{children}</div>
-      {right}
-    </div>
-  )
-}
-
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const WEEKDAYS = [0, 1, 2, 3, 4]
-const WEEKEND = [5, 6]
-const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
-
-// "Daily rhythm": the two rate knobs are per-weekday — pick a day and edit, or
-// apply the day's values to a whole group. Grace is split out as a global knob.
-function DailyRhythm({ sens, save }: { sens: Sensitivity; save: (patch: Partial<SettingsT>) => Promise<void> }) {
-  const [day, setDay] = useState(() => (new Date().getDay() + 6) % 7) // 0=Mon … 6=Sun
-  const overrides = sens.dayOverrides ?? []
-  const ovr = (wd: number) => overrides.find((o) => o.weekday === wd)
-  const ttdFor = (wd: number) => ovr(wd)?.timeToDeathMin ?? sens.timeToDeathMin
-  const ratioFor = (wd: number) => ovr(wd)?.healDrainRatio ?? sens.healDrainRatio
-
-  const writeOverrides = (next: DayOverride[]) =>
-    void save({ sensitivity: { ...sens, dayOverrides: next.sort((a, b) => a.weekday - b.weekday) } })
-  const upsertDay = (wd: number, patch: Partial<DayOverride>) =>
-    writeOverrides([
-      ...overrides.filter((o) => o.weekday !== wd),
-      { weekday: wd, timeToDeathMin: ttdFor(wd), healDrainRatio: ratioFor(wd), ...patch },
-    ])
-  const applyToDays = (wds: number[]) => {
-    const ttd = ttdFor(day)
-    const ratio = ratioFor(day)
-    writeOverrides([
-      ...overrides.filter((o) => !wds.includes(o.weekday)),
-      ...wds.map((wd) => ({ weekday: wd, timeToDeathMin: ttd, healDrainRatio: ratio })),
-    ])
-  }
-
-  const chip = (wd: number) => {
-    const on = wd === day
-    const weekend = wd >= 5
-    return (
-      <button
-        key={wd}
-        onClick={() => setDay(wd)}
-        className="nn-ui"
-        style={{
-          padding: '8px 6px', borderRadius: 'var(--r-sm)', fontSize: 12, fontWeight: 600, cursor: 'pointer', textAlign: 'center',
-          border: `1px solid ${on ? 'var(--accent-border)' : 'var(--line)'}`,
-          background: on ? 'var(--accent-surface)' : 'var(--surface-faint)',
-          color: on ? 'var(--accent-text)' : weekend ? 'var(--teal)' : 'var(--text)',
-        }}
-      >
-        {DAY_LABELS[wd]}
-      </button>
-    )
-  }
-
-  return (
-    <Card pad={20}>
-      <SectionTitle>Daily rhythm</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6, marginBottom: 20 }}>{ALL_DAYS.map(chip)}</div>
-      <SliderRow title="Daily distraction allowance" value={Math.round(ttdFor(day))} min={5} max={120} step={5} onChange={(v) => upsertDay(day, { timeToDeathMin: v })} accent="var(--warning)" fmt={(v) => `${v} min/day`} />
-      <SliderRow title="Health restoration" value={Math.round(ratioFor(day) * 100)} min={1} max={50} step={1} onChange={(v) => upsertDay(day, { healDrainRatio: v / 100 })} accent="var(--success)" fmt={(v) => `factor of ${v}%`} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 0 0' }}>
-        <span style={{ fontSize: 12, color: 'var(--faint)' }}>Apply values to:</span>
-        <Btn variant="line" size="sm" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => applyToDays(WEEKDAYS)}>Weekdays</Btn>
-        <Btn variant="line" size="sm" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => applyToDays(WEEKEND)}>Weekends</Btn>
-        <Btn variant="line" size="sm" style={{ padding: '4px 9px', fontSize: 11.5 }} onClick={() => applyToDays(ALL_DAYS)}>All</Btn>
-      </div>
-    </Card>
-  )
-}
-
-// Global (not per-day): grace before a waiting turn escalates the drain, and how
-// much harder distraction hits while a turn is waiting on you.
-function DriftPenalty({ sens, save }: { sens: Sensitivity; save: (patch: Partial<SettingsT>) => Promise<void> }) {
-  return (
-    <Card pad={20}>
-      <SectionTitle>Drift penalty</SectionTitle>
-      <div style={{ fontSize: 12.5, color: 'var(--faint)', lineHeight: 1.5, marginBottom: 4 }}>
-        Distractions always spend your daily budget. When Claude has finished and is waiting on you, they spend it faster.
-      </div>
-      <SliderRow title="Grace before a waiting turn counts" value={sens.graceSecs} min={1} max={60} step={1} onChange={(v) => void save({ sensitivity: { ...sens, graceSecs: v } })} accent="var(--warning)" fmt={(v) => `${v}s`} />
-      <SliderRow title="Drain multiplier while waiting" value={sens.waitingMultiplier} min={1} max={10} step={0.5} onChange={(v) => void save({ sensitivity: { ...sens, waitingMultiplier: v } })} accent="var(--critical)" fmt={(v) => `${v}×`} last />
-    </Card>
-  )
-}
 
 export function Settings() {
-  const settings = useSettings((s) => s.settings)
-  const save = useSettings((s) => s.save)
-  const loadSettings = useSettings((s) => s.load)
-  const settingsLoaded = useSettings((s) => s.loaded)
-  const connection = useUsage((s) => s.connection)
-  const rescan = useUsage((s) => s.rescan)
-  const setHooks = useUsage((s) => s.setHooks)
-  // `connected` only means a Claude log dir exists; tracking also needs the hook.
-  const hooked = !!connection?.connected && !!connection?.hooksInstalled
-  const theme = usePrefs((s) => s.theme)
-  const sound = usePrefs((s) => s.sound)
-  const chimeVoice = usePrefs((s) => s.chimeVoice)
-  const chimeVolume = usePrefs((s) => s.chimeVolume)
-  const companion = usePrefs((s) => s.companion)
-  const updateChannel = usePrefs((s) => s.updateChannel)
-  const setPref = usePrefs((s) => s.set)
+  const prefs = usePrefs()
+  const setPref = prefs.set
   const [checking, setChecking] = useState(false)
-  const onCheckUpdates = async () => {
+  const check = async () => {
     setChecking(true)
-    try { await checkForUpdates({ manual: true }) } finally { setChecking(false) }
+    await checkForUpdates({ manual: true })
+    setChecking(false)
   }
-
-  useEffect(() => { armChimeUnlock() }, [])
-
-  const notifSoundInput = useRef<HTMLInputElement>(null)
-  const [notifSoundError, setNotifSoundError] = useState<string | null>(null)
-  const [notifSoundInstalling, setNotifSoundInstalling] = useState(false)
-
-  const onNotifSoundPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
-    setNotifSoundError(null)
-    setNotifSoundInstalling(true)
-    try {
-      const buf = await file.arrayBuffer()
-      const result = await api.installNotificationSound(new Uint8Array(buf), ext)
-      if (!result.live) { setNotifSoundError('Custom sounds require the desktop app.'); return }
-      await loadSettings()
-    } catch (err) {
-      setNotifSoundError(String(err))
-    } finally {
-      setNotifSoundInstalling(false)
-    }
-  }
-
-  const removeNotifSound = async () => {
-    await api.removeNotificationSound()
-    await loadSettings()
-  }
-
-  const previewNotifSound = (path: string) => {
-    // convertFileSrc not needed here — we use a regular Audio element with the
-    // asset:// protocol that Tauri sets up for local files in the webview.
-    const a = new Audio(`asset://localhost/${encodeURIComponent(path).replace(/%2F/g, '/')}`)
-    void a.play().catch(() => {
-      // If asset:// doesn't work in this context, fall back to a fetch+blob.
-      fetch(`asset://localhost/${encodeURIComponent(path).replace(/%2F/g, '/')}`)
-        .then((r) => r.blob())
-        .then((b) => { new Audio(URL.createObjectURL(b)).play() })
-        .catch(() => {})
-    })
-  }
-
-  const [discovered, setDiscovered] = useState<string[]>([])
-  const [scanning, setScanning] = useState(false)
-
-  useEffect(() => { if (!settingsLoaded) void loadSettings() }, [settingsLoaded, loadSettings])
-  useEffect(() => { void api.getKnownApps().then((r) => setDiscovered(r.data.map((a) => a.name))) }, [])
-
-  if (!settings) return <div style={{ color: 'var(--faint)', fontSize: 13 }}>Loading…</div>
-
-  const tagged = settings.distractionApps
-  const worked = settings.workApps ?? []
-  const isDistraction = (name: string) => tagged.some((d) => d.toLowerCase() === name.toLowerCase())
-  const isWork = (name: string) => worked.some((w) => w.toLowerCase() === name.toLowerCase())
-  const classOf = (name: string): AppClassKey => (isDistraction(name) ? 'distraction' : isWork(name) ? 'work' : 'neutral')
-
-  // union of discovered + tagged + work apps (tagged/work always show). Stable
-  // alphabetical order so a row never jumps position when its class changes.
-  const seen = new Map<string, string>()
-  for (const n of [...discovered, ...tagged, ...worked]) {
-    if (!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n)
-  }
-  const apps = [...seen.values()].sort((a, b) => a.localeCompare(b))
-
-  const setClass = (name: string, cls: AppClassKey) => {
-    const low = name.toLowerCase()
-    const nextD = tagged.filter((d) => d.toLowerCase() !== low)
-    const nextW = worked.filter((w) => w.toLowerCase() !== low)
-    if (cls === 'distraction') nextD.push(name)
-    else if (cls === 'work') nextW.push(name)
-    void save({ distractionApps: nextD, workApps: nextW })
-  }
-
-  const scan = async () => {
-    setScanning(true)
-    const [known, running] = await Promise.all([api.getKnownApps(), api.listRunningApps()])
-    const names = new Set([...known.data.map((a) => a.name), ...running.data])
-    setDiscovered((prev) => [...new Set([...prev, ...names])])
-    setTimeout(() => setScanning(false), 600)
-  }
-
-  const sens = settings.sensitivity
-
   return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 14, alignItems: 'start' }}>
-        {/* LEFT — focus behaviour: what drains the Nube, then how it reacts */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Card pad={20}>
-            <SectionTitle right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Pill tone="danger" style={{ fontSize: 11.5 }}>{tagged.length} draining</Pill>
-              <Pill tone="work" style={{ fontSize: 11.5 }}>{worked.length} working</Pill>
-              <Btn variant="line" size="sm" onClick={scan}>{scanning ? 'Scanning…' : 'Scan apps'}</Btn>
-            </div>}>
-              Apps
-            </SectionTitle>
-            {apps.length === 0 && !scanning && (
-              <div style={{ textAlign: 'center', padding: '20px 0 6px', color: 'var(--faint)', fontSize: 13 }}>No apps detected yet — run a scan.</div>
-            )}
-            <div style={{ maxHeight: 248, overflow: 'auto', margin: '0 -2px', paddingRight: 2 }}>
-              {apps.map((name, i) => <AppRow key={name} name={name} value={classOf(name)} onChange={(v) => setClass(name, v)} last={i === apps.length - 1} />)}
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 14, alignItems: 'stretch', maxWidth: 1100 }}>
+      <Card pad={20}>
+        <Section>General</Section>
+        <PrefRow title="Theme">
+          <SegTabs<Theme> tabs={[{ key: 'dark', label: 'Dark' }, { key: 'light', label: 'Light' }]} value={prefs.theme} onChange={(v) => setPref('theme', v)} size="sm" />
+        </PrefRow>
+        <PrefRow title="Desktop companion" desc="A floating Nube that shows your timer and rest." last>
+          <Toggle on={prefs.companion} onChange={(v) => setPref('companion', v)} />
+        </PrefRow>
+      </Card>
+      <Card pad={20}>
+        <Section>Sound</Section>
+        <PrefRow title="Chimes" desc="Plays when a timer ends or you start resting." last={!prefs.sound}>
+          <Toggle on={prefs.sound} onChange={(v) => setPref('sound', v)} />
+        </PrefRow>
+        {prefs.sound && (
+          <PrefRow title="Voice">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Btn variant="line" size="sm" onClick={() => playChime(prefs.chimeVoice, prefs.chimeVolume)}>Preview</Btn>
+              <select value={prefs.chimeVoice} onChange={(e) => { const v = e.target.value as ChimeVoice; setPref('chimeVoice', v); playChime(v, prefs.chimeVolume) }} className="nn-ui"
+                style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '6px 10px', cursor: 'pointer', colorScheme: prefs.theme }}>
+                {CHIME_VOICES.map((v) => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}
+              </select>
             </div>
-          </Card>
-
-          <DailyRhythm sens={sens} save={save} />
-          <DriftPenalty sens={sens} save={save} />
-        </div>
-
-        {/* RIGHT — the app: connection, appearance, sound, maintenance */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Card pad={20}>
-            <SectionTitle right={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600, color: hooked ? 'var(--success)' : 'var(--faint)' }}><Dot tone={hooked ? 'var(--success)' : 'var(--faint)'} size={7} pulse={hooked} /> {hooked ? 'Connected' : connection?.connected ? 'Hook not installed' : 'Not connected'}</span>}>
-              Claude Code
-            </SectionTitle>
-            <div className="nn-mono" style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 14 }}>{connection?.projectsDetected ?? 0} projects · {(connection?.sessionsScanned ?? 0).toLocaleString()} sessions scanned</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {connection?.hooksInstalled
-                ? <Btn variant="line" size="sm" onClick={() => void setHooks(false)}>Remove hook</Btn>
-                : <Btn variant="primary" size="sm" onClick={() => void setHooks(true)}>Install hook</Btn>}
-              <Btn variant="soft" size="sm" onClick={() => void rescan()}>Rescan logs</Btn>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--faint)', lineHeight: 1.5, marginTop: 14 }}>
-              The hook tells Nube the moment Claude finishes a turn, so drift only counts while Claude is actually idle.
-            </div>
-          </Card>
-
-          <Card pad={20}>
-            <SectionTitle>General</SectionTitle>
-            <PrefRow title="Theme" desc="Configure your preferred theme.">
-              <SegTabs<Theme> tabs={[{ key: 'dark', label: 'Dark' }, { key: 'light', label: 'Light' }]} value={theme} onChange={(v) => setPref('theme', v)} size="sm" />
-            </PrefRow>
-            <PrefRow title="Desktop companion" desc="A floating widget that watches over you.">
-              <Toggle on={companion} onChange={(v) => setPref('companion', v)} />
-            </PrefRow>
-            <PrefRow title="Keep display awake" desc="Stops your screen and Mac from sleeping while Claude is actively working." last>
-              <Toggle on={!!settings.keepAwake} onChange={(v) => void save({ keepAwake: v })} />
-            </PrefRow>
-          </Card>
-
-          <Card pad={20}>
-            <SectionTitle>Sound</SectionTitle>
-            <PrefRow title="Sound" desc="A chime when Claude finishes and is waiting on you; a notification when you drift." last={!sound}>
-              <Toggle on={sound} onChange={(v) => setPref('sound', v)} />
-            </PrefRow>
-            {sound && (
-              <PrefRow title="Chime" desc="Pick a voice for the finish chime, then preview it.">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button
-                    onClick={() => playChime(chimeVoice, chimeVolume)}
-                    title="Preview chime"
-                    style={{ width: 32, height: 32, flexShrink: 0, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.8v8.4L10 6z" /></svg>
-                  </button>
-                  <select
-                    value={chimeVoice}
-                    onChange={(e) => { const v = e.target.value as ChimeVoice; setPref('chimeVoice', v); playChime(v, chimeVolume) }}
-                    className="nn-ui"
-                    style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '7px 11px', cursor: 'pointer', colorScheme: theme }}
-                  >
-                    {CHIME_VOICES.map((v) => <option key={v} value={v}>{VOICE_LABEL[v]}</option>)}
-                  </select>
-                </div>
-              </PrefRow>
-            )}
-            {sound && (
-              <SliderRow title="Chime volume" value={Math.round(chimeVolume * 100)} min={0} max={100} step={5} onChange={(v) => setPref('chimeVolume', v / 100)} accent="var(--accent)" fmt={(v) => `${v}%`} />
-            )}
-            {sound && (
-              <PrefRow title="Notification sound" desc="Plays when you drift to a distraction app." last>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {settings.notificationSoundName && settings.notificationSoundPath ? (
-                    <>
-                      <span style={{ fontSize: 12.5, color: 'var(--faint)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {settings.notificationSoundPath.split('/').pop()}
-                      </span>
-                      <button onClick={() => previewNotifSound(settings.notificationSoundPath!)} title="Preview" style={{ width: 28, height: 28, flexShrink: 0, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.8v8.4L10 6z" /></svg>
-                      </button>
-                      <button onClick={() => void removeNotifSound()} title="Remove" style={{ width: 28, height: 28, flexShrink: 0, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--faint)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, lineHeight: 1 }}>×</button>
-                    </>
-                  ) : (
-                    <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>System default</span>
-                  )}
-                  <input ref={notifSoundInput} type="file" accept="audio/*" style={{ display: 'none' }} onChange={(e) => void onNotifSoundPicked(e)} />
-                  <Btn variant="line" size="sm" onClick={() => notifSoundInput.current?.click()} disabled={notifSoundInstalling}>
-                    {notifSoundInstalling ? 'Installing…' : 'Browse…'}
-                  </Btn>
-                </div>
-                {notifSoundError && <div style={{ fontSize: 12, color: 'var(--critical)', marginTop: 6 }}>{notifSoundError}</div>}
-              </PrefRow>
-            )}
-          </Card>
-
-          <Card pad={20}>
-            <SectionTitle right={<Pill style={{ fontSize: 11.5 }}>v{version}</Pill>}>Updates</SectionTitle>
-            <PrefRow title="Release channel" desc="Beta builds get new features sooner." last>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <SegTabs<UpdateChannel> tabs={[{ key: 'stable', label: 'Stable' }, { key: 'beta', label: 'Beta' }]} value={updateChannel} onChange={(v) => setPref('updateChannel', v)} size="sm" />
-                <Btn variant="line" size="sm" onClick={() => void onCheckUpdates()} disabled={checking}>{checking ? 'Checking…' : 'Check'}</Btn>
-              </div>
-            </PrefRow>
-          </Card>
-        </div>
-      </div>
+          </PrefRow>
+        )}
+        {prefs.sound && (
+          <Slider title="Volume" value={Math.round(prefs.chimeVolume * 100)} min={0} max={100} step={5} onChange={(v) => setPref('chimeVolume', v / 100)} fmt={(v) => `${v}%`} last />
+        )}
+      </Card>
+      <Card pad={20}>
+        <Section right={<Pill style={{ fontSize: 11.5 }}>{`v${version}`}</Pill>}>Updates</Section>
+        <PrefRow title="Release channel" desc="Beta gets new features first." last>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <SegTabs<UpdateChannel> tabs={[{ key: 'stable', label: 'Stable' }, { key: 'beta', label: 'Beta' }]} value={prefs.updateChannel} onChange={(v) => setPref('updateChannel', v)} size="sm" />
+            <Btn variant="line" size="sm" onClick={() => void check()} disabled={checking}>{checking ? 'Checking…' : 'Check'}</Btn>
+          </div>
+        </PrefRow>
+      </Card>
     </div>
   )
 }

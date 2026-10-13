@@ -3,20 +3,14 @@
 #![allow(unexpected_cfgs)]
 // Nube Nube — native (Rust) entry point.
 
-mod awake;
 mod commands;
-mod connector;
 mod db;
-mod drift;
 mod dto;
-mod events_tail;
-mod hooks_installer;
-mod model;
+mod economy;
+mod engine;
 mod notify;
 mod settings;
-mod store_paths;
 mod watcher;
-mod water;
 
 use std::sync::{Arc, Mutex};
 
@@ -26,7 +20,7 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
 use commands::AppState;
-use drift::DriftRuntime;
+use engine::Engine;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -75,26 +69,12 @@ pub fn run() {
                 )?;
             }
 
-            let dir = app.path().app_data_dir().expect("resolve app data dir");
-            let _ = std::fs::create_dir_all(&dir);
-            let db_path = dir.join("nube.db");
-            let config_dir = dir.clone();
-
-            app.manage(AppState {
-                db_path: db_path.clone(),
-                config_dir: config_dir.clone(),
-            });
-
-            // Connector: initial scan + fs watcher.
-            connector::start(app.handle().clone(), db_path.clone());
-
-            // Self-heal previously-installed hooks (empty-array regression).
-            let _ = hooks_installer::ensure_installed();
-
-            // Drift: watcher loop + Claude-Code event tail.
-            let runtime = Arc::new(Mutex::new(DriftRuntime::new(db_path, config_dir)));
-            drift::start_watcher(app.handle().clone(), runtime.clone());
-            events_tail::start(app.handle().clone(), runtime);
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            // A fresh file: the pre-redesign nube.db (Claude usage) is left untouched.
+            let engine = Arc::new(Mutex::new(Engine::new(dir.join("focus.db"), dir)?));
+            app.manage(AppState { engine: engine.clone() });
+            engine::start(app.handle().clone(), engine);
 
             // System tray (live presence + quick menu).
             let open = MenuItem::with_id(app, "open", "Open Nube Nube", true, None::<&str>)?;
@@ -135,23 +115,20 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::get_projects,
-            commands::get_totals,
+            commands::get_focus,
+            commands::start_timer,
+            commands::stop_timer,
+            commands::set_target,
+            commands::set_day_target,
+            commands::set_day_rest,
             commands::get_insights,
-            commands::get_connection_status,
-            commands::get_project_detail,
-            commands::rescan_logs,
             commands::get_settings,
             commands::save_settings,
-            commands::install_hooks,
-            commands::uninstall_hooks,
+            commands::get_known_apps,
+            commands::list_running_apps,
             commands::nube_open_main,
             commands::nube_set_companion,
             commands::nube_resize_companion,
-            commands::get_known_apps,
-            commands::list_running_apps,
-            commands::install_notification_sound,
-            commands::remove_notification_sound,
             commands::check_update,
             commands::install_update,
         ])

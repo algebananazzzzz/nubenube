@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { usePrefs } from '../store/prefs';
 import { useUpdater } from '../store/updater';
+import { say } from '../store/toast';
 
 type UpdateInfo = { version: string; current: string; notes: string | null };
 
@@ -15,7 +16,7 @@ type UpdateInfo = { version: string; current: string; notes: string | null };
 export async function checkForUpdates(opts?: { manual?: boolean }): Promise<void> {
   const u = useUpdater.getState();
   if (import.meta.env.DEV) {
-    if (opts?.manual) u.setNotice('Update checks are disabled in dev builds.');
+    if (opts?.manual) say('Update checks are disabled in dev builds.');
     return;
   }
   if (getCurrentWebviewWindow().label !== 'main') return;
@@ -23,7 +24,7 @@ export async function checkForUpdates(opts?: { manual?: boolean }): Promise<void
   try {
     const info = await invoke<UpdateInfo | null>('check_update', { channel });
     if (!info) {
-      if (opts?.manual) u.setNotice(`You're on the latest ${channel} build.`);
+      if (opts?.manual) say(`You're on the latest ${channel} build.`);
       return;
     }
     u.setPending(info);
@@ -33,7 +34,7 @@ export async function checkForUpdates(opts?: { manual?: boolean }): Promise<void
     if (opts?.manual) {
       const msg = String(e);
       const noStableRelease = channel === 'stable' && /release JSON|fetch|404/i.test(msg);
-      u.setNotice(
+      say(
         noStableRelease
           ? 'No stable release published yet — switch to Beta for the latest builds.'
           : `Update check failed: ${e}`
@@ -53,6 +54,6 @@ export async function installPendingUpdate(): Promise<void> {
   } catch (e) {
     u.setInstalling(false);
     u.setPending(null);
-    u.setNotice(`Update failed: ${e}`);
+    say(`Update failed: ${e}`);
   }
 }

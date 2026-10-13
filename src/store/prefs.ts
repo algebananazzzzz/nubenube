@@ -10,7 +10,7 @@ export type UpdateChannel = 'stable' | 'beta'
 export type Prefs = {
   theme: Theme
   sound: boolean // master toggle for chimes
-  chimeVoice: ChimeVoice // timbre of the "Claude finished" chime
+  chimeVoice: ChimeVoice // timbre of the timer-done / rest chimes
   chimeVolume: number // 0..1
   companion: boolean
   companionMini: boolean

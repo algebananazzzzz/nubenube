@@ -1,7 +1,7 @@
 [package]
 name = "nubenube"
 version = "0.4.4"
-description = "Nube Nube — a gentle desktop focus companion powered by your Claude Code usage"
+description = "Nube Nube, a gentle desktop focus companion: focus timers earn rest, distractions spend it"
 authors = ["Nube Nube"]
 license = ""
 repository = ""
@@ -34,22 +34,14 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
-# Usage connector + storage
+# Storage
 rusqlite = { version = "0.32", features = ["bundled"] }
 chrono = { version = "0.4", features = ["clock"] }
-walkdir = "2"
-notify = "6"
-dirs = "5"
-anyhow = "1"
 
-# Active-window + idle (drift tracking). Both crates handle the platform specifics
+# Active-window + idle. Both crates handle the platform specifics
 # internally (macOS = no permission for app name + idle; Linux X11 full, Wayland fallback).
 active-win-pos-rs = "0.11"
 user-idle = "0.6"
-
-# Keep the display/system awake while Claude is actively working (opt-in). Pure
-# Rust, cross-platform (macOS IOKit, Linux ScreenSaver/systemd-inhibit via D-Bus).
-keepawake = "0.6"
 
 # macOS: native NSWindow tweaks for the companion overlay — float over full-screen
 # apps + all Spaces (fullScreenAuxiliary) and drag by the window background.

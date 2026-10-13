@@ -1,5 +1,4 @@
-// Synthesized chime for the "Claude finished, you're being waited on" bell.
-// Built with WebAudio (no shipped audio asset) so the voice/volume are fully
+// Synthesized chimes for "timer done" and "you started resting". Built with WebAudio (no shipped audio asset) so the voice/volume are fully
 // tweakable and nothing lands in the repo as a binary. Played by whichever
 // window owns playback (the Companion); the `sound` pref is checked at the call
 // site, not here.
@@ -21,8 +20,7 @@ const VOICES: Record<ChimeVoice, Voice> = {
 export const CHIME_VOICES = Object.keys(VOICES) as ChimeVoice[]
 
 // A note = [frequency Hz, start offset secs]. `finish` is a calm rising fourth
-// (E5→A5); `drift` is a more insistent descending triad (kept for callers that
-// want an in-app drift cue — the OS notification carries drift sound by default).
+// (E5→A5); `drift` is a softer descending triad for when rest starts.
 const EVENTS: Record<string, [number, number][]> = {
   finish: [[659.25, 0], [880.0, 0.11]],
   drift: [[587.33, 0], [440.0, 0.13], [329.63, 0.26]],

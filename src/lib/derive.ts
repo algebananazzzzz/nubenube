@@ -1,176 +1,70 @@
-// Bridges the backend FocusTick (src/types.ts) + theme pref into NubeState, the
-// view-model components consume: life→mood/sky, drift→countdown, live timers.
+// Composes the live FocusTick, settings and theme into the view-model the pages
+// and the companion read: rest health, today's pace, creature mood/sky/clay,
+// and timer projections.
 
 import { useFocus } from '../store/focus'
-import { usePrefs, type Theme } from '../store/prefs'
+import { usePrefs } from '../store/prefs'
 import { useSettings } from '../store/settings'
-import { useBudgetClock, useCountUp } from './useCountdown'
-import { hueClay, lifeTint, sessionTier, type Clay } from './clay'
-import type { FocusState, FocusTick } from '../types'
+import { hueClay, hueSwatch, lifeTint } from './clay'
+import { FINISH, finishAt, finishTier, hpTone, projectBonus, todayPace, type Mood } from './economy'
+import { mockSettings } from './mockData'
+import { fmtCountdown } from './format'
+import type { Settings } from '../types'
 
-const NO_WORK_APPS: string[] = [] // stable ref so an unloaded settings store doesn't churn renders
+export type Sky = 'good' | 'alert' | 'worried' | 'danger' | 'idle' | 'fading' | 'faint'
 
-export const BASELINE = 100
-export const CAP = 300
-
-export type Mood = 'thriving' | 'content' | 'alert' | 'worried' | 'gasping' | 'fading' | 'faint'
-export type Sky = 'good' | 'working' | 'alert' | 'worried' | 'danger' | 'calm' | 'idle' | 'fading' | 'faint'
-
-// mood is a function of life only (not the clock). Above baseline it tracks the
-// banked fraction toward `cap` (not an absolute point), so the top "thriving"
-// face scales with whatever the cap is — reached once you're in the top half of
-// the burst range (≥200% at the default 300 cap).
-export function deriveMood(life: number, cap = CAP): Mood {
-  const over = cap > BASELINE ? (life - BASELINE) / (cap - BASELINE) : 0
-  if (over >= 0.5) return 'thriving'
-  if (life >= BASELINE) return 'content'
-  if (life >= 80) return 'alert'
-  if (life >= 55) return 'worried'
-  if (life >= 30) return 'gasping'
-  if (life >= 8) return 'fading'
-  return 'faint'
+// Rules only, so they are safe to show before the real settings load; anything
+// that saves settings must wait for the store instead.
+export function useRules(): Settings {
+  return useSettings((s) => s.settings) ?? mockSettings
 }
 
-// sky = status tint behind the creature; low life overrides state
-export function deriveSky(life: number, state: FocusState): Sky {
-  if (life < 8) return 'faint'
-  if (life < 30) return 'fading'
-  switch (state) {
-    case 'vibing': return life >= 100 ? 'good' : 'working'
-    case 'waiting': return 'alert'
-    case 'drifting': return life < 55 ? 'danger' : 'worried'
-    case 'chillin': return 'alert'
-    default: return 'idle'
-  }
-}
-
-export function fmtClock(secs: number): string {
-  secs = Math.max(0, Math.round(secs))
-  const h = Math.floor(secs / 3600)
-  const m = Math.floor((secs % 3600) / 60)
-  const s = secs % 60
-  if (h) return `${h}h ${String(m).padStart(2, '0')}m`
-  if (m) return `${m}m ${String(s).padStart(2, '0')}s`
-  return `${s}s`
-}
-
-// digital countdown — M:SS or H:MM:SS
-export function fmtCountdown(secs: number): string {
-  secs = Math.max(0, Math.round(secs))
-  const h = Math.floor(secs / 3600)
-  const m = Math.floor((secs % 3600) / 60)
-  const s = secs % 60
-  if (h) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
-export type Status = { label: string; tone: string; pulse: boolean }
-
-// label = literal state word; distraction states append the app name
-export function statusFor(state: FocusState, appName: string | null): Status {
-  const app = appName || 'a distraction'
-  switch (state) {
-    case 'vibing': return { label: 'Vibing', tone: 'var(--success)', pulse: true }
-    case 'waiting': return { label: 'Waiting', tone: 'var(--accent)', pulse: true }
-    case 'drifting': return { label: `Drifting · ${app}`, tone: 'var(--critical)', pulse: true }
-    case 'chillin': return { label: `Chillin · ${app}`, tone: 'var(--teal)', pulse: false }
-    default: return { label: 'Idle', tone: 'var(--faint)', pulse: false }
-  }
-}
-
-// title = state word; line = one-sentence explanation
-export function cueFor(s: NubeState): { title: string; line: string } {
-  const app = s.appName || 'a distraction'
-  switch (s.effState) {
-    case 'drifting': return { title: `Drifting · ${app}`, line: `Claude is waiting while you're on ${app} — budget draining fast.` }
-    case 'chillin': return { title: `Chillin · ${app}`, line: `You're on ${app} — spending today's distraction budget.` }
-    case 'waiting': return { title: 'Waiting', line: 'Claude finished and is waiting on you.' }
-    case 'vibing': return { title: 'Vibing', line: 'Claude is working for you — Nube is banking life.' }
-    default: return { title: 'Idle', line: 'No Claude sessions right now.' }
-  }
-}
-
-// secondary metric caption (count), keyed by state
-export function timerFor(s: NubeState): string {
-  if (s.effState === 'vibing') return `${s.run} running`
-  if (s.effState === 'waiting') return `${s.wait} waiting`
-  return ''
-}
-
-export type NubeState = {
-  tick: FocusTick
-  theme: Theme
-  life: number
-  baseline: number
-  cap: number
-  effState: FocusState
-  appName: string | null
-  run: number
-  wait: number
-  // live (ticking) "today" totals for the Home timers:
-  work: number // session-weighted Claude-working secs (faster with more windows)
-  distracted: number // seconds on a distraction
-  workApp: number // seconds the foreground was a work app today
-  mood: Mood
-  sky: Sky
-  clay: Clay
-  glow: boolean // session tier 4+ — creature gets an aura
-  budgetLeft: number // seconds of daily distraction budget remaining (smoothed)
-  budgetTotal: number // full budget in seconds (baseline level)
-  fainting: boolean
-  fmtClock: typeof fmtClock
-  fmtCountdown: typeof fmtCountdown
-}
-
-export function useNube(): NubeState {
+export function useFocusView() {
   const tick = useFocus((s) => s.tick)
   const theme = usePrefs((s) => s.theme)
+  const s = useRules()
+  const dark = theme === 'dark'
+  const today = tick.week[tick.weekday]
+  const target = today.target
 
-  const rawLife = tick.cloudHealth
-  const baseline = tick.baseline || BASELINE
-  const cap = tick.cap || CAP
-  const effState = tick.state
-  const appName = tick.appName?.trim() ? tick.appName.trim() : null
-  const run = tick.runningSessions ?? 0
-  const wait = tick.waitingSessions ?? 0
-  const distract = tick.distractSecsToday ?? 0
-  // Creature color is driven by concurrent sessions (running + waiting), not the
-  // project hue — more sessions warm + saturate the clay to reward fanning out.
-  const tier = sessionTier(run + wait)
+  // Health = banked rest vs. the rest planned for the rest of the week.
+  const wanted = tick.week.reduce((a, d, i) => a + (i >= tick.weekday ? d.restPlan : 0), 0)
+  const hp = wanted > 0 ? tick.bank / wanted : tick.bank > 0 ? 1 : 0
+  const phase = todayPace(today.focus, target)
+  const inTimer = tick.state === 'timer' || tick.state === 'timerDrift'
+  const calm = tick.state !== 'timer'
 
-  // Budget = life viewed in minutes: budgetLeft = (life/baseline)·budgetTotal,
-  // banked above 100% up to the 300% cap. The shown life snaps to each backend
-  // tick (no countdown animation); the budget timer interpolates between ticks
-  // from the signed backend rate so "Xm left" ticks down smoothly.
-  const life = rawLife
-  const frozen = tick.frozen ?? false
-  const budgetTotal = tick.budgetTotalSecs ?? 0
-  const ratePerMin = tick.budgetRatePerMin ?? 0
-  const budgetAnchor = baseline > 0 ? (life / baseline) * budgetTotal : 0
-  const budgetLeft = useBudgetClock(budgetAnchor, frozen ? 0 : ratePerMin / 60)
-  // fainting tracks the authoritative life meter, not the budget scale (which is
-  // 0 until a fresh backend reports budgetTotalSecs — don't read that as spent).
-  const fainting = life <= 0
+  const { satMul, ltAdd } = lifeTint(Math.max(0, Math.min(300, 40 + hp * 120)), 100, 300)
+  const sky: Sky = hp <= 0 ? 'faint'
+    : hp < 0.1 ? 'fading'
+    : tick.state === 'timer' ? 'good'
+    : tick.state === 'timerDrift' ? 'danger'
+    : tick.state === 'drift' ? (hp < 0.15 ? 'danger' : 'worried')
+    : 'idle'
 
-  const { satMul, ltAdd } = lifeTint(life, baseline, cap)
-  const clay = hueClay(tier.hue, satMul * tier.satScale, ltAdd)
-  const mood = deriveMood(life, cap)
-  const sky = deriveSky(life, effState)
-
-  // Anchored to the backend totals; ticks locally each second while the state is
-  // active so the Home clocks advance smoothly between ~2s backend updates.
-  const onDistraction = effState === 'drifting' || effState === 'chillin'
-  const work = useCountUp(tick.workSecsToday ?? 0, !frozen ? run : 0) // +run/sec
-  const distracted = useCountUp(distract, onDistraction ? 1 : 0)
-  const workApps = useSettings((st) => st.settings?.workApps) ?? NO_WORK_APPS
-  const onWorkApp = !!appName && workApps.some((w) => w.toLowerCase() === appName.toLowerCase())
-  const workApp = useCountUp(tick.workAppSecsToday ?? 0, !frozen && onWorkApp ? 1 : 0)
+  const tier = finishTier(tick.run, s.finishEvery)
+  const nextTierIn = tier < FINISH.length - 1 ? (tier + 1) * s.finishEvery * 60 - tick.run : 0
+  const tracked = today.focus + today.distract
 
   return {
-    tick, theme, life, baseline, cap, effState, appName,
-    run, wait, work, distracted, workApp,
-    mood, sky, clay, glow: tier.glow,
-    budgetLeft, budgetTotal, fainting,
-    fmtClock, fmtCountdown,
+    ...tick, theme, dark, today, target, hp, hpTone: hpTone(hp), wanted, phase,
+    mood: phase.mood as Mood, sky, inTimer,
+    clay: hueClay(phase.hue, satMul * (calm ? 0.55 : phase.sat), ltAdd),
+    glow: !calm && !!phase.glow,
+    targetPct: target ? today.focus / target : 0,
+    ratioToday: tracked ? today.focus / tracked : 0,
+    finish: finishAt(tick.run, s.finishEvery), tier, nextTierIn,
+    projected: tick.pending + projectBonus(tick.run, tick.left, s.finishEvery, s.ratio),
   }
+}
+
+export type FocusView = ReturnType<typeof useFocusView>
+
+// One-line status for the sidebar chip and the companion.
+export function statusLine(f: FocusView): { tone: string; text: string; pulse: boolean } {
+  if (f.away) return { tone: 'var(--faint)', text: f.inTimer ? `Away · ${fmtCountdown(f.left)}` : 'Away', pulse: false }
+  if (f.state === 'timer') return { tone: hueSwatch(f.phase.hue, f.dark), text: `Focusing · ${fmtCountdown(f.left)}`, pulse: true }
+  if (f.state === 'timerDrift') return { tone: 'var(--critical)', text: `Drifted · ${f.app}`, pulse: true }
+  if (f.state === 'drift') return { tone: f.hp < 0.15 ? 'var(--critical)' : 'var(--warning)', text: `On ${f.app}`, pulse: true }
+  return { tone: 'var(--faint)', text: 'Idle', pulse: false }
 }

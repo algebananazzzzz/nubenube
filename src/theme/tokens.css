@@ -37,9 +37,8 @@
   --critical:       #e52228; --critical-on: #c00005; --critical-surface: #fff5f5; --critical-border: #fbd4d4;
   --work:           #4f46e5; --work-surface: #eef2ff; --work-border: #c7d2fe;
 
-  /* focus state colors */
-  --teal: #0d9488;   /* chillin — relaxed, off-task but nothing blocked */
-  --calm: #8b85d4;   /* paused  — muted indigo, intentional not alarming */
+  --teal: #0d9488;   /* planned rest */
+  --excellent: oklch(0.6 0.17 300); /* "Excellent" pace: ahead of today's target */
 
   /* elevation — Helios is nearly flat; overlays get a small lift */
   --shadow-sm: 0 1px 2px rgba(12,12,14,.05);
@@ -83,7 +82,7 @@
   --work:           #818cf8; --work-surface: rgba(79,70,229,.16); --work-border: rgba(129,140,248,.36);
 
   --teal: #2dd4bf;
-  --calm: #6668a8;
+  --excellent: oklch(0.72 0.15 300);
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
   --shadow-md: 0 2px 8px rgba(0,0,0,.4);
