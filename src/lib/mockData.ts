@@ -14,7 +14,7 @@ export const mockSettings: Settings = {
   },
   sites: [
     ...['youtube.com', 'reddit.com', 'x.com', 'instagram.com', 'tiktok.com'].map((domain) => ({ domain, class: 'rest' as const })),
-    ...['github.com', 'gitlab.com', 'stackoverflow.com', 'developer.mozilla.org', 'docs.google.com', 'notion.so', 'figma.com', 'linear.app', 'atlassian.net', 'claude.ai', 'chatgpt.com', 'overleaf.com'].map((domain) => ({ domain, class: 'work' as const })),
+    ...['github.com', 'gitlab.com', 'docs.google.com', 'atlassian.net', 'claude.ai', 'chatgpt.com'].map((domain) => ({ domain, class: 'work' as const })),
     { domain: 'mail.google.com', class: 'neutral' },
   ],
   blockSites: true,
