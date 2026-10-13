@@ -22,8 +22,6 @@ use crate::{browser, db, notify, watcher};
 const IDLE_SECS: u64 = 120;
 /// Cap on one tick's elapsed time so a suspend/resume gap isn't booked as focus.
 const MAX_TICK_DT: f64 = 5.0;
-/// Continuous seconds on a Rest app or site mid-timer before the drift notification.
-const DRIFT_NOTIFY_SECS: f64 = 15.0;
 const TIMER_KEY: &str = "timer";
 
 #[derive(Serialize, Clone)]
@@ -41,11 +39,11 @@ pub struct Engine {
     timer: Option<Timer>,
     state: &'static str,
     app: String,
+    /// "work" | "neutral" | "rest", from the site when listed, else the app.
+    app_class: String,
     away: bool,
     last_tick: Instant,
     settings: (Option<SystemTime>, Settings),
-    drift_secs: f64,
-    drift_notified: bool,
     last_app: String,
     browser: browser::Shared,
 }
@@ -78,11 +76,10 @@ impl Engine {
             state: economy::state(timer.is_some(), Foreground::Focus),
             timer,
             app: String::new(),
+            app_class: "neutral".into(),
             away: false,
             last_tick: Instant::now(),
             settings,
-            drift_secs: 0.0,
-            drift_notified: false,
             last_app: String::new(),
             browser,
         })
@@ -133,6 +130,7 @@ impl Engine {
         FocusTick {
             state: self.state.to_string(),
             app: self.app.clone(),
+            app_class: self.app_class.clone(),
             away: self.away,
             left: t.map_or(0.0, |t| t.left.max(0.0)),
             len: t.map_or(0.0, |t| t.len),
@@ -166,12 +164,14 @@ impl Engine {
             Foreground::Focus
         };
         let name = site.unwrap_or_else(|| snap.app_name.clone());
+        let app_class = class.to_string();
 
         let before = self.week[wd].clone();
         let events = economy::step(&mut self.timer, &mut self.week[wd], &rules, fg, dt);
         self.state = economy::state(self.timer.is_some(), fg);
         self.away = away;
         self.app = name;
+        self.app_class = app_class;
         let block = if self.timer.is_some() { blocked } else { Vec::new() };
         self.browser.lock().expect("browser mutex poisoned").set_block(block);
         let focus = self.week[wd].focus - before.focus;
@@ -195,22 +195,15 @@ impl Engine {
         tx.commit()?;
         self.last_app = snap.app_name;
 
-        if self.state == "timerDrift" {
-            self.drift_secs += dt;
-            if !self.drift_notified && self.drift_secs >= DRIFT_NOTIFY_SECS {
-                self.drift_notified = true;
-                notify::drifted(app, &self.app);
-            }
-        } else {
-            self.drift_secs = 0.0;
-            self.drift_notified = false;
-        }
-
         for ev in events {
             let ev = match ev {
                 Event::Finished { earned, bonus } => {
                     notify::timer_done(app, earned);
                     FocusEvent::TimerFinished { earned, bonus }
+                }
+                Event::Broken { .. } => {
+                    notify::timer_broken(app, &self.app);
+                    continue;
                 }
                 Event::TargetHit { bonus } => FocusEvent::TargetHit { bonus },
             };

@@ -26,9 +26,8 @@ const presetLabel = (m: number) => (m >= 60 && m % 60 === 0 ? `${m / 60}h` : `${
 function heroCopy(f: FocusView): { title: string; line: string; tone: string; pulse: boolean } {
   if (f.away) return { title: 'Away', line: "Tracking pauses while you're away, so nothing is earned or spent.", tone: 'var(--faint)', pulse: false }
   switch (f.state) {
-    case 'timer': return { title: `Focusing · ${f.app || 'NubeNube'}`, line: f.extension ? 'Rest sites are blocked until the timer ends.' : 'Rest apps spend your rest, and the timer keeps running.', tone: hueSwatch(f.phase.hue, f.dark), pulse: true }
-    case 'timerDrift': return { title: `Drifted to ${f.app}`, line: "This is spending your rest and resets your multiplier. Get back to it!", tone: 'var(--critical)', pulse: true }
-    case 'drift': return { title: `On ${f.app}`, line: 'No session running, so this comes out of your earned rest.', tone: f.hp < 0.15 ? 'var(--critical)' : 'var(--warning)', pulse: true }
+    case 'timer': return { title: `Focusing · ${f.app || 'NubeNube'}`, line: f.extension ? 'Rest sites are blocked, and opening a Rest app ends the timer.' : 'Opening a Rest app or site ends the timer.', tone: f.appClass === 'work' ? 'var(--success)' : hueSwatch(f.phase.hue, f.dark), pulse: true }
+    case 'drift': return { title: `Resting · ${f.app}`, line: 'No session running, so this comes out of your earned rest.', tone: f.hp < 0.15 ? 'var(--critical)' : 'var(--warning)', pulse: true }
     default: return f.today.hit
       ? { title: 'Target hit', line: 'Nice! Anything more is extra rest earned.', tone: 'var(--success)', pulse: false }
       : { title: 'Ready', line: "Start a focus session whenever you're ready.", tone: 'var(--faint)', pulse: false }
@@ -66,11 +65,10 @@ function Hero() {
   const f = useFocusView(), s = useRules()
   const cue = heroCopy(f)
   const big = f.inTimer ? fmtCountdown(f.left) : '−1×'
-  const bigTone = f.state === 'timer' ? 'var(--ink)' : f.state === 'timerDrift' ? 'var(--critical)' : 'var(--warning)'
+  const bigTone = f.inTimer ? 'var(--ink)' : 'var(--warning)'
   const prog = f.inTimer ? 1 - f.left / Math.max(1, f.len) : 0
   const eyebrow = f.inTimer ? `Timer · ${Math.round(f.len / 60)} min` : f.state === 'drift' ? 'Spending rest' : 'Start focusing'
-  const earning = f.state === 'timer' ? `Finish to earn +${fmtHM(f.len / s.ratio)} rest, +${fmtHM(f.projected)} bonus`
-    : f.state === 'timerDrift' ? 'Spending 1 min of rest per minute' : null
+  const earning = f.inTimer ? `Finish to earn +${fmtHM(f.len / s.ratio)} rest, +${fmtHM(f.projected)} bonus` : null
   const preset = s.presets[1] ?? s.presets[0] ?? 45
   return (
     <Card pad={0} style={{ overflow: 'hidden', display: 'flex', flexWrap: 'wrap', minHeight: 320 }}>
@@ -112,10 +110,10 @@ function Hero() {
               </div>
             </div>
           )}
-        {f.inTimer && <div style={{ marginTop: 14 }}><Bar pct={prog} height={8} color={f.state === 'timerDrift' ? 'var(--critical)' : hueSwatch(f.phase.hue, f.dark)} /></div>}
+        {f.inTimer && <div style={{ marginTop: 14 }}><Bar pct={prog} height={8} color={hueSwatch(f.phase.hue, f.dark)} /></div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14, flexWrap: 'wrap', minHeight: 30 }}>
           <FinishPips tier={f.tier} active={f.state === 'timer'} every={s.finishEvery} dark={f.dark} />
-          {earning && <span className="nn-num" style={{ fontSize: 12, color: f.state === 'timerDrift' ? 'var(--critical)' : 'var(--success)' }}>{earning}</span>}
+          {earning && <span className="nn-num" style={{ fontSize: 12, color: 'var(--success)' }}>{earning}</span>}
           <span style={{ flex: 1 }} />
           {f.inTimer && <Btn variant="line" size="sm" onClick={() => void stopTimer()}>Stop early</Btn>}
           {f.state === 'drift' && <QuickPicks />}

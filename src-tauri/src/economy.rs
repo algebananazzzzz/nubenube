@@ -1,5 +1,5 @@
 //! The focus economy. Time inside a running timer earns rest at 1/ratio per
-//! second; a Rest app or site spends it 1:1; the weekly bank is
+//! second; a Rest app or site spends it 1:1 and ends any running timer; the weekly bank is
 //! Σ(earned − spent) since Monday and may go negative. Pure, so the rules are
 //! tested apart from the OS watcher and the database.
 
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Finish-bonus multiplier steps. Unbroken focus inside a timer climbs one step
 /// every `finish_every` minutes; the accrued extra is paid when the timer
-/// finishes, drifting resets the climb, and stopping early forfeits it.
+/// finishes, and stopping early or resting mid-timer forfeits it.
 pub const FINISH: [f64; 4] = [1.0, 1.15, 1.3, 1.5];
 
 pub fn finish_tier(run_secs: f64, every_min: f64) -> usize {
@@ -35,7 +35,7 @@ pub struct Day {
     pub distract: f64,
     /// Rest earned, at the ratio in effect when it was earned, plus all bonuses.
     pub earned: f64,
-    /// Rest spent on Rest apps and sites, in or out of a timer.
+    /// Rest spent on Rest apps and sites.
     pub spent: f64,
     pub target: Option<f64>,
     pub hit: bool,
@@ -74,12 +74,13 @@ pub enum Foreground {
 #[derive(Debug, PartialEq)]
 pub enum Event {
     Finished { earned: f64, bonus: f64 },
+    /// A Rest app or site came to the front mid-timer, which ends the timer.
+    Broken { forfeited: f64 },
     TargetHit { bonus: f64 },
 }
 
 pub fn state(timer: bool, fg: Foreground) -> &'static str {
     match (timer, fg) {
-        (true, Foreground::Rest) => "timerDrift",
         (true, _) => "timer",
         (false, Foreground::Rest) => "drift",
         _ => "idle",
@@ -100,39 +101,34 @@ pub fn apply_target(day: &mut Day, target: Option<f64>, bonus_secs: f64) {
 /// Advance the economy by `dt` seconds with `fg` in front.
 pub fn step(timer: &mut Option<Timer>, day: &mut Day, rules: &Rules, fg: Foreground, dt: f64) -> Vec<Event> {
     let mut events = Vec::new();
-    let Some(t) = timer.as_mut() else {
-        if fg == Foreground::Rest {
-            day.distract += dt;
-            day.spent += dt;
+    if fg == Foreground::Rest {
+        if let Some(t) = timer.take() {
+            events.push(Event::Broken { forfeited: t.pending });
         }
+        day.distract += dt;
+        day.spent += dt;
+        return events;
+    }
+    let Some(t) = timer.as_mut() else {
         return events;
     };
 
     t.left -= dt;
-    match fg {
-        Foreground::Focus => {
-            let base = dt / rules.ratio;
-            day.focus += dt;
-            day.earned += base;
-            t.earned += base;
-            t.run += dt;
-            t.pending += (finish_at(t.run, rules.finish_every_min) - 1.0) * base;
-            if !day.hit && day.target.is_some_and(|tg| day.focus >= tg) {
-                apply_target(day, day.target, rules.target_bonus_secs);
-                events.push(Event::TargetHit { bonus: rules.target_bonus_secs });
-            }
+    if fg == Foreground::Focus {
+        let base = dt / rules.ratio;
+        day.focus += dt;
+        day.earned += base;
+        t.earned += base;
+        t.run += dt;
+        t.pending += (finish_at(t.run, rules.finish_every_min) - 1.0) * base;
+        if !day.hit && day.target.is_some_and(|tg| day.focus >= tg) {
+            apply_target(day, day.target, rules.target_bonus_secs);
+            events.push(Event::TargetHit { bonus: rules.target_bonus_secs });
         }
-        Foreground::Rest => {
-            t.run = 0.0;
-            day.distract += dt;
-            day.spent += dt;
-        }
-        Foreground::Away => {}
     }
 
     if t.left <= 0.0 {
-        // Running out while drifted forfeits the bonus, same as stopping early.
-        let bonus = if fg == Foreground::Rest { 0.0 } else { t.pending };
+        let bonus = t.pending;
         day.earned += bonus;
         events.push(Event::Finished { earned: t.earned + bonus, bonus });
         *timer = None;
@@ -189,14 +185,21 @@ mod tests {
     }
 
     #[test]
-    fn drifting_in_a_timer_spends_one_to_one_and_resets_the_climb() {
+    fn resting_mid_timer_ends_it_and_forfeits_the_bonus() {
         let mut t = Some(Timer::new(60.0));
         let mut d = Day::default();
         run(&mut t, &mut d, Foreground::Focus, 1000);
-        assert_eq!(finish_tier(t.as_ref().unwrap().run, 15.0), 1);
-        run(&mut t, &mut d, Foreground::Rest, 10);
-        assert!(close(d.spent, 10.0));
-        assert!(close(t.as_ref().unwrap().run, 0.0));
+        let pending = t.as_ref().unwrap().pending;
+        assert!(pending > 0.0);
+        let ev = run(&mut t, &mut d, Foreground::Rest, 1);
+        assert!(t.is_none());
+        assert!(matches!(ev[..], [Event::Broken { forfeited }] if close(forfeited, pending)));
+        assert!(close(d.earned, 1000.0 / 5.0));
+        assert!(close(d.spent, 1.0));
+        assert!(close(d.distract, 1.0));
+        // With the timer gone, further rest spends 1:1 like any other.
+        run(&mut t, &mut d, Foreground::Rest, 59);
+        assert!(close(d.spent, 60.0));
     }
 
     #[test]
@@ -210,16 +213,6 @@ mod tests {
         let bonus = 301.0 * 0.15 / 5.0;
         assert!(close(d.earned, base + bonus));
         assert!(matches!(ev[..], [Event::Finished { earned, bonus: b }] if close(earned, base + bonus) && close(b, bonus)));
-    }
-
-    #[test]
-    fn running_out_while_drifted_forfeits_the_bonus() {
-        let mut t = Some(Timer::new(20.0));
-        let mut d = Day::default();
-        run(&mut t, &mut d, Foreground::Focus, 1199);
-        let ev = run(&mut t, &mut d, Foreground::Rest, 1);
-        assert!(matches!(ev[..], [Event::Finished { bonus, .. }] if bonus == 0.0));
-        assert!(close(d.earned, 1199.0 / 5.0));
     }
 
     #[test]
@@ -256,7 +249,6 @@ mod tests {
     fn state_names() {
         assert_eq!(state(true, Foreground::Focus), "timer");
         assert_eq!(state(true, Foreground::Away), "timer");
-        assert_eq!(state(true, Foreground::Rest), "timerDrift");
         assert_eq!(state(false, Foreground::Rest), "drift");
         assert_eq!(state(false, Foreground::Focus), "idle");
     }

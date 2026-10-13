@@ -44,9 +44,8 @@ impl Default for Settings {
             sites: [
                 ("rest", &["youtube.com", "reddit.com", "x.com", "instagram.com", "tiktok.com"][..]),
                 ("work", &[
-                    "github.com", "gitlab.com", "stackoverflow.com", "developer.mozilla.org",
-                    "docs.google.com", "notion.so", "figma.com", "linear.app", "atlassian.net",
-                    "claude.ai", "chatgpt.com", "overleaf.com",
+                    "github.com", "gitlab.com", "docs.google.com", "atlassian.net",
+                    "claude.ai", "chatgpt.com",
                 ][..]),
             ]
             .into_iter()

@@ -6,7 +6,7 @@ Guidance for working in this repo.
 
 NubeNube: a Tauri 2 desktop focus companion. Time inside a running focus timer
 earns rest at a work:rest ratio; time on a Rest-class app or site spends it
-1:1, and the bank may go negative. Rest banks weekly (resets Monday). A daily
+1:1 and ends a running timer, and the bank may go negative. Rest banks weekly (resets Monday). A daily
 target pays a bonus when hit; a per-timer finish multiplier pays when the timer
 runs out. A cloud creature (the *Nube*) reflects today's pace. Local-first, no
 accounts, no network calls for tracking.
@@ -81,7 +81,8 @@ Do NOT rely on `npm run lint`; the lint config is pre-broken and not a signal.
 
 - `economy.rs`: the rules, pure and unit-tested: `step()` advances a timer +
   today's `Day` by `dt` for a foreground (`Focus` = any non-Rest app, `Rest`,
-  `Away`), `apply_target`, `bank`, `state` names (`idle|timer|timerDrift|drift`).
+  `Away`), `apply_target`, `bank`, `state` names (`idle|timer|drift`). A Rest
+  foreground ends a running timer (bonus forfeited).
 - `engine.rs`: `Engine` behind `Arc<Mutex<>>`: 1 s tick (watcher → economy →
   DB → `focus-tick` + `focus-event`), timer/target/plan commands, running timer
   persisted in `meta` so it survives restarts. Idle ≥ 120 s = Away.

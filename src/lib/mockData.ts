@@ -14,7 +14,7 @@ export const mockSettings: Settings = {
   },
   sites: [
     ...['youtube.com', 'reddit.com', 'x.com', 'instagram.com', 'tiktok.com'].map((domain) => ({ domain, class: 'rest' as const })),
-    ...['github.com', 'gitlab.com', 'stackoverflow.com', 'developer.mozilla.org', 'docs.google.com', 'notion.so', 'figma.com', 'linear.app', 'atlassian.net', 'claude.ai', 'chatgpt.com', 'overleaf.com'].map((domain) => ({ domain, class: 'work' as const })),
+    ...['github.com', 'gitlab.com', 'docs.google.com', 'atlassian.net', 'claude.ai', 'chatgpt.com'].map((domain) => ({ domain, class: 'work' as const })),
     { domain: 'mail.google.com', class: 'neutral' },
   ],
   blockSites: true,
@@ -40,7 +40,7 @@ function mockWeek(): Day[] {
 
 let tick: FocusTick = (() => {
   const week = mockWeek()
-  return { state: 'timer', app: 'Cursor', away: false, left: 1100, len: 2700, run: 1600, pending: 12, weekday: todayIdx(), week, bank: bankOf(week), extension: false }
+  return { state: 'timer', app: 'Cursor', appClass: 'work', away: false, left: 1100, len: 2700, run: 1600, pending: 12, weekday: todayIdx(), week, bank: bankOf(week), extension: false }
 })()
 
 function bankOf(week: Day[]) {
