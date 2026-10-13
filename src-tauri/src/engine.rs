@@ -22,6 +22,10 @@ use crate::{browser, db, notify, watcher};
 const IDLE_SECS: u64 = 120;
 /// Cap on one tick's elapsed time so a suspend/resume gap isn't booked as focus.
 const MAX_TICK_DT: f64 = 5.0;
+/// Ticks of no focused app shown as the previous app. Switching windows passes
+/// through a tick or two with no focused window, which would otherwise flash the
+/// companion's tint to neutral and back.
+const SWITCH_GRACE: u32 = 3;
 const TIMER_KEY: &str = "timer";
 
 #[derive(Serialize, Clone)]
@@ -45,6 +49,8 @@ pub struct Engine {
     last_tick: Instant,
     settings: (Option<SystemTime>, Settings),
     last_app: String,
+    /// Consecutive ticks with no focused app (see SWITCH_GRACE).
+    blank_ticks: u32,
     browser: browser::Shared,
 }
 
@@ -81,6 +87,7 @@ impl Engine {
             last_tick: Instant::now(),
             settings,
             last_app: String::new(),
+            blank_ticks: 0,
             browser,
         })
     }
@@ -170,8 +177,11 @@ impl Engine {
         let events = economy::step(&mut self.timer, &mut self.week[wd], &rules, fg, dt);
         self.state = economy::state(self.timer.is_some(), fg);
         self.away = away;
-        self.app = name;
-        self.app_class = app_class;
+        self.blank_ticks = if name.is_empty() { self.blank_ticks + 1 } else { 0 };
+        if self.blank_ticks == 0 || self.blank_ticks > SWITCH_GRACE {
+            self.app = name.clone();
+            self.app_class = app_class;
+        }
         let block = if self.timer.is_some() { blocked } else { Vec::new() };
         self.browser.lock().expect("browser mutex poisoned").set_block(block);
         let focus = self.week[wd].focus - before.focus;
@@ -188,8 +198,8 @@ impl Engine {
         if !away {
             db::add_slot(&tx, &day, slot, focus, distract)?;
         }
-        if !self.app.is_empty() && (focus > 0.0 || distract > 0.0) {
-            db::add_app_time(&tx, &day, &self.app, focus, distract)?;
+        if !name.is_empty() && (focus > 0.0 || distract > 0.0) {
+            db::add_app_time(&tx, &day, &name, focus, distract)?;
         }
         self.save_timer()?;
         tx.commit()?;
