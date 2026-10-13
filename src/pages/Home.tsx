@@ -178,6 +178,7 @@ function WeekPlanner() {
   const earnOf = (i: number) => (i < today ? f.week[i].earned : focusOf(i) / s.ratio + (focusOf(i) ? s.targetBonusMin * 60 : 0))
   const cum = f.week.map((_, i) => earnOf(i) - restOf(i)).reduce<number[]>((acc, v) => (acc.push((acc.length ? acc[acc.length - 1] : 0) + v), acc), [])
   const plannedFocus = f.week.reduce((a, d, i) => a + (i < today ? d.focus : Math.max(focusOf(i), i === today ? d.focus : 0)), 0)
+  const workDone = f.week.reduce((a, d) => a + d.focus, 0)
   const end = cum[6], plannedRest = f.week.reduce((a, _, i) => a + restOf(i), 0)
 
   const commit = (i: number, kind: Draft['kind'], v: number) => {
@@ -225,6 +226,7 @@ function WeekPlanner() {
     <Card pad={20}>
       <Section sub="Commit to focusing more on weekdays to enjoy your weekends!">This week's commitments</Section>
       <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap', padding: '12px 14px', borderRadius: 'var(--r-md)', background: end >= 0 ? 'var(--success-surface)' : 'var(--critical-surface)', border: `1px solid ${end >= 0 ? 'var(--success-border)' : 'var(--critical-border)'}`, marginBottom: 16 }}>
+        <div><div className="nn-num" style={{ fontSize: 18, color: PL_FOCUS }}>{fmtHM(workDone)}</div><div style={{ fontSize: 11.5, color: 'var(--faint)' }}>work done</div></div>
         <div><div className="nn-num" style={{ fontSize: 18, color: PL_FOCUS }}>{fmtHM(plannedFocus)}</div><div style={{ fontSize: 11.5, color: 'var(--faint)' }}>work planned</div></div>
         <div><div className="nn-num" style={{ fontSize: 18, color: PL_REST }}>{fmtHM(plannedRest)}</div><div style={{ fontSize: 11.5, color: 'var(--faint)' }}>rest planned</div></div>
         <span style={{ flex: 1 }} />
