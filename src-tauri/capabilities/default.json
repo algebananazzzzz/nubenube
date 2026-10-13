@@ -13,13 +13,6 @@
     "core:window:allow-set-position",
     "core:window:allow-set-size",
     "core:window:allow-start-dragging",
-    "core:event:default",
-    "store:default",
-    "notification:default",
-    "autostart:allow-enable",
-    "autostart:allow-disable",
-    "autostart:allow-is-enabled",
-    "updater:default",
-    "process:allow-restart"
+    "core:event:default"
   ]
 }

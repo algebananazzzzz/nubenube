@@ -1,0 +1,7 @@
+{
+  "uuid": "nubenube-tracker@nubenube.app",
+  "name": "NubeNube Tracker",
+  "description": "Tells NubeNube which app is in front. GNOME on Wayland hides the focused window from other apps.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/algebananazzzzz/nubenube"
+}

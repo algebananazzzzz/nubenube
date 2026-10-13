@@ -2,18 +2,18 @@
 // pill, both content-sized; a ResizeObserver reports the measured size to Rust
 // (nube_resize_companion) so the OS window tracks the content exactly.
 
-import { useEffect, useRef, type ReactNode, type Ref } from 'react'
-import { listen } from '@tauri-apps/api/event'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { useEffect, useRef, type Ref } from 'react'
 import { useFocus } from '../store/focus'
 import { usePrefs } from '../store/prefs'
+import { useSettings } from '../store/settings'
 import { armChimeUnlock, playChime } from '../lib/chime'
-import { isTauri } from '../lib/api'
+import { events } from '../lib/api'
 import { rescue } from '../lib/rescue'
-import { useNube, statusFor, type NubeState } from '../lib/derive'
-import { themeVars } from '../lib/clay'
+import { hueSwatch, themeVars } from '../lib/clay'
+import { statusLine, useFocusView, type FocusView } from '../lib/derive'
+import { fmtCountdown, fmtHM } from '../lib/format'
 import { Sky, Nube } from './NubeCreature'
-import { Dot, Btn, LifeBar } from './ui'
+import { Bar, Btn, Dot } from './ui'
 
 const CARD_W = 208 // logical px — the card's fixed width; height flows from content
 const PAD = 12 // transparent breathing room around the card for its soft shadow
@@ -27,77 +27,50 @@ function Grip() {
   )
 }
 
-function MiniStat({ tone, value, label }: { tone: string; value: ReactNode; label: string }) {
-  return (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px', borderRadius: 'var(--r-sm)', background: 'var(--surface-faint)', border: '1px solid var(--line-faint)' }}>
-      <span style={{ width: 7, height: 7, borderRadius: '50%', background: tone, flexShrink: 0 }} />
-      <span className="nn-num" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{value}</span>
-      <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 500 }}>{label}</span>
-    </div>
-  )
+// The headline number: the countdown inside a timer, the rest bank otherwise.
+function headline(f: FocusView) {
+  if (f.inTimer) {
+    return {
+      value: fmtCountdown(f.left), label: 'left',
+      tone: f.state === 'timerDrift' ? 'var(--critical)' : 'var(--ink)',
+      pct: 1 - f.left / Math.max(1, f.len),
+      bar: f.state === 'timerDrift' ? 'var(--critical)' : hueSwatch(f.phase.hue, f.dark),
+    }
+  }
+  return { value: fmtHM(f.bank), label: 'rest', tone: f.hpTone, pct: f.hp, bar: f.hpTone }
 }
 
-// budget urgency — minutes of today's distraction budget left + a bar
-function CompactBudget({ s }: { s: NubeState }) {
-  const crit = s.life < 30
-  const tone = crit ? 'var(--critical)' : 'var(--warning)'
-  const surf = crit ? 'var(--critical-surface)' : 'var(--warning-surface)'
-  const bd = crit ? 'var(--critical-border)' : 'var(--warning-border)'
-  const pct = s.budgetTotal > 0 ? Math.max(0, Math.min(1, s.budgetLeft / s.budgetTotal)) : 0
-  return (
-    <div style={{ background: surf, border: `1px solid ${bd}`, borderRadius: 'var(--r-md)', padding: '8px 10px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: tone }}>
-          <Dot tone={tone} size={5} pulse /> {s.fainting ? 'budget spent' : 'budget left'}
-        </span>
-        <span className="nn-num" style={{ fontSize: 15, fontWeight: 700, color: tone, lineHeight: 1 }}>{s.fmtClock(s.budgetLeft)}</span>
-      </div>
-      <div style={{ marginTop: 6, height: 4, borderRadius: 999, background: 'var(--surface-strong)', overflow: 'hidden' }}>
-        <div style={{ width: `${pct * 100}%`, height: '100%', background: tone, borderRadius: 999, transition: 'width 1s linear' }} />
-      </div>
-    </div>
-  )
-}
-
-function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: () => void; innerRef: Ref<HTMLDivElement> }) {
-  const st = statusFor(s.effState, s.appName)
-  const lifeTone = s.life >= 100 ? 'var(--success)' : s.life < 30 ? 'var(--critical)' : 'var(--warning)'
+function CompanionCard({ f, onMinimize, innerRef }: { f: FocusView; onMinimize: () => void; innerRef: Ref<HTMLDivElement> }) {
+  const st = statusLine(f)
+  const h = headline(f)
   return (
     <div ref={innerRef} className="nn-ui" style={{
-      width: CARD_W, borderRadius: 'var(--r-lg)', overflow: 'hidden',
-      background: 'var(--surface)',
-      border: '1px solid var(--line)', userSelect: 'none',
-      animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
+      width: CARD_W, borderRadius: 'var(--r-lg)', overflow: 'hidden', background: 'var(--surface)',
+      border: '1px solid var(--line)', userSelect: 'none', animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
     }}>
-      {/* draggable creature header */}
       <div data-tauri-drag-region="deep" style={{ position: 'relative', cursor: 'grab', height: 92, borderBottom: '1px solid var(--line-faint)' }}>
-        <Sky sky={s.sky} style={{ position: 'absolute', inset: 0 }}>
+        <Sky sky={f.sky} style={{ position: 'absolute', inset: 0 }}>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-            <Nube mood={s.mood} size={74} glow={s.glow} />
+            <Nube mood={f.mood} size={74} glow={f.glow} />
           </div>
         </Sky>
         <div style={{ position: 'absolute', top: 7, left: 0, right: 0, display: 'flex', justifyContent: 'center', color: 'var(--faint)', pointerEvents: 'none' }}><Grip /></div>
       </div>
-      {/* body — content-sized, no fillers */}
       <div style={{ padding: '12px 13px 13px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <Dot tone={st.tone} pulse={st.pulse} size={8} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{st.label}</span>
-          <span className="nn-num" style={{ flexShrink: 0, fontSize: 14, fontWeight: 700, color: lifeTone }}>{Math.round(s.life)}%</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.inTimer ? (f.state === 'timerDrift' ? `Drifted · ${f.app}` : 'Focusing') : st.text}</span>
         </div>
-
-        {/* budget urgency while on a distraction, otherwise the at-a-glance life bar */}
-        <div style={{ marginTop: 11 }}>
-          {s.effState === 'drifting' || s.effState === 'chillin'
-            ? <CompactBudget s={s} />
-            : <LifeBar life={s.life} baseline={s.baseline} cap={s.cap} height={8} labels={false} />}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 10 }}>
+          <span className="nn-num" style={{ fontSize: 26, fontWeight: 700, color: h.tone, lineHeight: 1 }}>{h.value}</span>
+          <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>{h.label}</span>
         </div>
-
-        <div style={{ display: 'flex', gap: 7, marginTop: 12 }}>
-          <MiniStat tone="var(--success)" value={s.run} label="running" />
-          <MiniStat tone="var(--warning)" value={s.wait} label="waiting" />
+        <div style={{ marginTop: 8 }}><Bar pct={h.pct} color={h.bar} height={6} /></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, padding: '7px 9px', borderRadius: 'var(--r-sm)', background: 'var(--surface-faint)', border: '1px solid var(--line-faint)' }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: f.phase.tone, flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.phase.name}</span>
+          {f.inTimer && <span className="nn-num" style={{ fontSize: 11.5, color: f.hpTone }}>{fmtHM(f.bank)}</span>}
         </div>
-
         <div style={{ display: 'flex', gap: 6, marginTop: 9 }}>
           <Btn variant="soft" size="sm" full onClick={() => void rescue.openMain()}>Open Nube</Btn>
           <button onClick={onMinimize} title="Minimize" style={{ flexShrink: 0, width: 32, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--text)', cursor: 'pointer', fontSize: 15, fontWeight: 700 }}>–</button>
@@ -107,84 +80,67 @@ function CompanionCard({ s, onMinimize, innerRef }: { s: NubeState; onMinimize: 
   )
 }
 
-function CompanionMini({ s, onExpand, innerRef }: { s: NubeState; onExpand: () => void; innerRef: Ref<HTMLDivElement> }) {
-  const st = statusFor(s.effState, s.appName)
-  const lifeTone = s.life >= 100 ? 'var(--success)' : s.life < 30 ? 'var(--critical)' : 'var(--warning)'
-  const drift = s.effState === 'drifting' || s.effState === 'chillin'
-  const cdTone = s.life < 30 ? 'var(--critical)' : 'var(--warning)'
+function CompanionMini({ f, onExpand, innerRef }: { f: FocusView; onExpand: () => void; innerRef: Ref<HTMLDivElement> }) {
+  const st = statusLine(f)
+  const h = headline(f)
   return (
     // inline-flex → the pill is exactly as wide as its content (no trailing gap)
-    <div ref={innerRef} data-tauri-drag-region="deep" title={st.label} style={{
+    <div ref={innerRef} data-tauri-drag-region="deep" title={st.text} className="nn-ui" style={{
       display: 'inline-flex', alignItems: 'center', gap: 9, height: 44, padding: '0 14px 0 6px',
-      borderRadius: 'var(--r-pill)', background: 'var(--surface)',
-      border: '1px solid var(--line)', cursor: 'grab', userSelect: 'none', whiteSpace: 'nowrap',
-      animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
-    }} className="nn-ui">
+      borderRadius: 'var(--r-pill)', background: 'var(--surface)', border: '1px solid var(--line)', cursor: 'grab',
+      userSelect: 'none', whiteSpace: 'nowrap', animation: 'nn-from-tr .18s var(--ease-soft)', transformOrigin: 'top right',
+    }}>
       <button onClick={onExpand} title="expand" style={{ width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', flexShrink: 0, border: '1px solid var(--line-faint)', background: 'var(--surface-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer' }}>
-        <Nube mood={s.mood} size={32} glow={s.glow} />
+        <Nube mood={f.mood} size={32} glow={f.glow} />
       </button>
       <span style={{ display: 'inline-flex', flexShrink: 0 }}><Dot tone={st.tone} pulse={st.pulse} size={8} /></span>
-      <span className="nn-num" style={{ fontSize: 14, fontWeight: 700, color: lifeTone, flexShrink: 0 }}>{Math.round(s.life)}%</span>
+      <span className="nn-num" style={{ fontSize: 14, fontWeight: 700, color: h.tone, flexShrink: 0 }}>{h.value}</span>
+      <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>{h.label}</span>
       <span style={{ width: 1, height: 16, background: 'var(--line)', flexShrink: 0 }} />
-      {drift && (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: cdTone, flexShrink: 0 }}>
-          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="7" cy="8" r="5" /><path d="M7 5.5V8l1.6 1" strokeLinecap="round" /><path d="M5.5 1.5h3" strokeLinecap="round" /></svg>
-          <span className="nn-num" style={{ fontSize: 13.5, fontWeight: 700 }}>{s.fmtClock(s.budgetLeft)}</span>
-        </span>
-      )}
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }} title="running"><Dot tone="var(--success)" size={6} /><span className="nn-num" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{s.run}</span></span>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }} title="waiting"><Dot tone="var(--warning)" size={6} /><span className="nn-num" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{s.wait}</span></span>
+      <span title={f.phase.name} style={{ width: 8, height: 8, borderRadius: '50%', background: f.phase.tone, flexShrink: 0 }} />
     </div>
   )
 }
 
 export function Companion() {
   const subscribe = useFocus((st) => st.subscribe)
-  const tick = useFocus((st) => st.tick)
+  const loadSettings = useSettings((st) => st.load)
+  const state = useFocus((st) => st.tick.state)
   const mini = usePrefs((st) => st.companionMini)
   const setPref = usePrefs((st) => st.set)
-  const sound = usePrefs((st) => st.sound)
-  const chimeVoice = usePrefs((st) => st.chimeVoice)
-  const chimeVolume = usePrefs((st) => st.chimeVolume)
-  const s = useNube()
+  const f = useFocusView()
   const cardRef = useRef<HTMLDivElement>(null)
-  const prevWaiting = useRef(tick.waitingSessions)
+  const prevState = useRef(state)
 
   useEffect(() => {
     document.documentElement.classList.add('nn-transparent')
     armChimeUnlock()
     void subscribe()
+    void loadSettings()
     return () => document.documentElement.classList.remove('nn-transparent')
-  }, [subscribe])
+  }, [subscribe, loadSettings])
 
-  // Windows/Linux: play the custom notification sound when a drift alert fires.
-  // macOS handles this via the OS notification sound mechanism instead.
+  // The companion is the single audio owner so chimes never double across windows.
   useEffect(() => {
-    if (!isTauri) return
-    const unlisten = listen<string>('play-notification-sound', ({ payload: path }) => {
-      const a = new Audio(convertFileSrc(path))
-      void a.play()
+    const off = events.onFocusEvent((e) => {
+      const p = usePrefs.getState()
+      if (e.kind === 'timerFinished' && p.sound) playChime(p.chimeVoice, p.chimeVolume, 'finish')
     })
-    return () => { void unlisten.then((fn) => fn()) }
+    return () => { void off.then((fn) => fn()) }
   }, [])
 
-  // The Companion is the single audio owner (so the chime never doubles across
-  // windows): when a session newly enters the waiting phase — Claude finished a
-  // turn and is now waiting on you — ring the chime. Keyed off waitingSessions
-  // (which counts regardless of foreground app), so it fires even if you've
-  // already wandered off.
   useEffect(() => {
-    const rose = tick.waitingSessions > prevWaiting.current
-    prevWaiting.current = tick.waitingSessions
-    if (rose && sound) playChime(chimeVoice, chimeVolume)
-  }, [tick.waitingSessions, sound, chimeVoice, chimeVolume])
+    const resting = (s: string) => s === 'drift' || s === 'timerDrift'
+    const started = resting(state) && !resting(prevState.current)
+    prevState.current = state
+    const p = usePrefs.getState()
+    if (started && p.sound) playChime(p.chimeVoice, p.chimeVolume, 'drift')
+  }, [state])
 
-  useEffect(() => { document.documentElement.setAttribute('data-theme', s.theme) }, [s.theme])
+  useEffect(() => { document.documentElement.setAttribute('data-theme', f.theme) }, [f.theme])
 
   // Drive the real OS window size from the measured card/pill (+ shadow padding).
-  // Observing the content element means every layout change — mini⇄full, the
-  // drift countdown appearing, a longer app name — re-fits the window. Re-bound
-  // on `mini` because the observed element itself swaps (card ⇄ pill).
+  // Re-bound on `mini` because the observed element itself swaps (card ⇄ pill).
   useEffect(() => {
     const el = cardRef.current
     if (!el) return
@@ -205,10 +161,10 @@ export function Companion() {
   return (
     // fit-content + padding → the wrapper hugs the card and leaves room for the
     // soft shadow; the window is then sized to (card + padding) by the effect.
-    <div className="nn-app" data-theme={s.theme} style={{ ...themeVars(s.theme, s.clay), width: 'fit-content', padding: PAD, background: 'transparent' }}>
+    <div className="nn-app" data-theme={f.theme} style={{ ...themeVars(f.theme, f.clay), width: 'fit-content', padding: PAD, background: 'transparent' }}>
       {mini
-        ? <CompanionMini s={s} innerRef={cardRef} onExpand={() => setPref('companionMini', false)} />
-        : <CompanionCard s={s} innerRef={cardRef} onMinimize={() => setPref('companionMini', true)} />}
+        ? <CompanionMini f={f} innerRef={cardRef} onExpand={() => setPref('companionMini', false)} />
+        : <CompanionCard f={f} innerRef={cardRef} onMinimize={() => setPref('companionMini', true)} />}
     </div>
   )
 }

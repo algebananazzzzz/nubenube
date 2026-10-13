@@ -1,10 +1,20 @@
-// Compact count formatting: 1234567 → "1.2M".
-export function formatCount(n: number): string {
-  if (n == null || !isFinite(n)) return '0'
-  const abs = Math.abs(n)
-  if (abs >= 1e12) return (n / 1e12).toFixed(1) + 'T'
-  if (abs >= 1e9) return (n / 1e9).toFixed(1) + 'B'
-  if (abs >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  if (abs >= 1e3) return (n / 1e3).toFixed(1) + 'K'
-  return `${Math.round(n)}`
+// "1h 05m" / "12m"; negative values keep a leading minus.
+export function fmtHM(secs: number): string {
+  const neg = secs < 0
+  secs = Math.abs(Math.round(secs))
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  return (neg ? '−' : '') + (h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`)
 }
+
+// digital countdown: M:SS or H:MM:SS
+export function fmtCountdown(secs: number): string {
+  secs = Math.max(0, Math.round(secs))
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  const s = secs % 60
+  if (h) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']

@@ -1,79 +1,42 @@
-// Bridge to the native (Rust) side. Every call falls back to mock data when the
-// command is missing or running outside Tauri, so the UI is always navigable.
+// Bridge to the native (Rust) side. Inside Tauri every call goes to Rust and its
+// errors reach the caller; in a plain browser the mock engine answers instead,
+// so the UI stays navigable under `npm run dev`.
 
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type {
-  ConnectionStatus,
-  FocusTick,
-  Insights,
-  KnownApp,
-  Project,
-  ProjectDetail,
-  RangeKey,
-  Settings,
-  Totals,
-} from '../types'
-import {
-  mockConnection,
-  mockInsights,
-  mockKnownApps,
-  mockProjectDetail,
-  mockProjects,
-  mockSettings,
-  mockTotals,
-} from './mockData'
+import type { FocusEvent, FocusTick, Insights, RangeKey, Settings, TrackingHelper } from '../types'
+import { mockApps, mockEngine, mockInsights, mockSettings } from './mockData'
 
 export const isTauri =
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in (window as unknown as object)
 
-export type Result<T> = { data: T; live: boolean }
-
-async function call<T>(cmd: string, args: Record<string, unknown>, fallback: () => T): Promise<Result<T>> {
-  if (isTauri) {
-    try {
-      const data = await invoke<T>(cmd, args)
-      return { data, live: true }
-    } catch (e) {
-      console.warn(`[nube] invoke('${cmd}') failed — using mock data:`, e)
-    }
-  }
-  return { data: fallback(), live: false }
+function call<T>(cmd: string, args: Record<string, unknown>, mock: () => T): Promise<T> {
+  return isTauri ? invoke<T>(cmd, args) : Promise.resolve(mock())
 }
 
 export const api = {
-  getProjects: () => call<Project[]>('get_projects', {}, () => mockProjects),
-  getTotals: () => call<Totals>('get_totals', {}, () => mockTotals),
+  getFocus: () => call<FocusTick>('get_focus', {}, mockEngine.get),
+  startTimer: (minutes: number) => call<void>('start_timer', { minutes }, () => mockEngine.startTimer(minutes)),
+  stopTimer: () => call<number>('stop_timer', {}, mockEngine.stopTimer),
+  setTarget: (secs: number) => call<void>('set_target', { secs }, () => mockEngine.setTarget(secs)),
+  setDayTarget: (day: number, secs: number | null) =>
+    call<void>('set_day_target', { day, secs }, () => mockEngine.setDayTarget(day, secs)),
+  setDayRest: (day: number, secs: number) => call<void>('set_day_rest', { day, secs }, () => mockEngine.setDayRest(day, secs)),
   getInsights: (range: RangeKey) => call<Insights>('get_insights', { range }, () => mockInsights(range)),
-  getConnection: () => call<ConnectionStatus>('get_connection_status', {}, () => mockConnection),
   getSettings: () => call<Settings>('get_settings', {}, () => mockSettings),
   saveSettings: (settings: Settings) => call<Settings>('save_settings', { settings }, () => settings),
-  rescanLogs: () => call<ConnectionStatus>('rescan_logs', {}, () => mockConnection),
-  installHooks: () =>
-    call<ConnectionStatus>('install_hooks', {}, () => ({ ...mockConnection, hooksInstalled: true })),
-  uninstallHooks: () =>
-    call<ConnectionStatus>('uninstall_hooks', {}, () => ({ ...mockConnection, hooksInstalled: false })),
-  getProjectDetail: (id: string, range: RangeKey) =>
-    call<ProjectDetail | null>('get_project_detail', { id, range }, () => mockProjectDetail(id, range)),
-  getKnownApps: () => call<KnownApp[]>('get_known_apps', {}, () => mockKnownApps),
-  listRunningApps: () => call<string[]>('list_running_apps', {}, () => mockKnownApps.map((a) => a.name)),
-  installNotificationSound: (data: Uint8Array, ext: string) =>
-    call<{ name: string; path: string }>('install_notification_sound', { data: Array.from(data), ext }, () => ({ name: '', path: '' })),
-  removeNotificationSound: () =>
-    call<void>('remove_notification_sound', {}, () => undefined),
+  listApps: () => call<string[]>('list_apps', {}, () => mockApps),
+  trackingHelper: () => call<TrackingHelper>('tracking_helper', {}, () => 'ok'),
+  installTrackingHelper: () => call<TrackingHelper>('install_tracking_helper', {}, () => 'ok'),
+  installBrowserExtension: () => call<string>('install_browser_extension', {}, () => '~/.local/share/com.nubenube.app/chrome-extension'),
 }
 
-async function subscribe<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {
-  if (!isTauri) return () => {}
-  try {
-    return await listen<T>(event, (e) => cb(e.payload))
-  } catch {
-    return () => {}
-  }
+function subscribe<T>(event: string, cb: (payload: T) => void, mock: (cb: (payload: T) => void) => () => void): Promise<UnlistenFn> {
+  if (!isTauri) return Promise.resolve(mock(cb))
+  return listen<T>(event, (e) => cb(e.payload))
 }
 
 export const events = {
-  onFocusTick: (cb: (t: FocusTick) => void) => subscribe<FocusTick>('focus-tick', cb),
-  // connector emits this with the new running token total when logs change
-  onUsageUpdated: (cb: (total: number) => void) => subscribe<number>('usage-updated', cb),
+  onFocusTick: (cb: (t: FocusTick) => void) => subscribe('focus-tick', cb, mockEngine.onTick),
+  onFocusEvent: (cb: (e: FocusEvent) => void) => subscribe('focus-event', cb, mockEngine.onEvent),
 }

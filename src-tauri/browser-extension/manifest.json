@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Nube Nube",
+  "version": "1.0.0",
+  "description": "Tells Nube Nube which site you're on, and blocks Rest sites while a focus timer runs.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnF+nwVUA9/jVcTN50vLFgNRzFArb5NsNhQ94I5ILODeOfcR/4LYmhDMAfm5bcS+/nT241cL/PfSlf48WqAtS5opquAzV4a0GvLsjx9ZKxUqM3vQuS02ApW1vjKApanQMJlilufsTmXBd65TjXa6uny+f/Y9kEGxLrOqkikSpdZS8LTFXuapDI+2rlWSNA+KBPTP++I11pIR3d0Ia/L2bNjQKMI9+pPVdVHOJ5fCdpb1p6EjO3gu/4R0B+dEXFwCFI74bC//2vdUJuHFM1W8l+j6ytAa5+/ysfEcf1T3UIFxYTOQsIMWIiTm7t8Tm26hEaFhpoFuQLpOP3cfkgi30OwIDAQAB",
+  "icons": { "128": "icon.png" },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["tabs", "declarativeNetRequest", "storage", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "web_accessible_resources": [{ "resources": ["blocked.html"], "matches": ["<all_urls>"] }]
+}

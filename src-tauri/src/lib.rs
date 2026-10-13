@@ -3,30 +3,26 @@
 #![allow(unexpected_cfgs)]
 // Nube Nube — native (Rust) entry point.
 
-mod awake;
+mod browser;
 mod commands;
-mod connector;
 mod db;
-mod drift;
 mod dto;
-mod events_tail;
-mod hooks_installer;
-mod model;
+mod economy;
+mod engine;
+mod gnome;
+mod installed;
 mod notify;
 mod settings;
-mod store_paths;
 mod watcher;
-mod water;
 
 use std::sync::{Arc, Mutex};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
-use tauri_plugin_autostart::MacosLauncher;
 
 use commands::AppState;
-use drift::DriftRuntime;
+use engine::Engine;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -45,11 +41,9 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             commands::show_main(app);
         }))
-        .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_clipboard_manager::init())
         // Close hides the main window; the app lives on in the tray.
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -75,26 +69,15 @@ pub fn run() {
                 )?;
             }
 
-            let dir = app.path().app_data_dir().expect("resolve app data dir");
-            let _ = std::fs::create_dir_all(&dir);
-            let db_path = dir.join("nube.db");
-            let config_dir = dir.clone();
-
-            app.manage(AppState {
-                db_path: db_path.clone(),
-                config_dir: config_dir.clone(),
-            });
-
-            // Connector: initial scan + fs watcher.
-            connector::start(app.handle().clone(), db_path.clone());
-
-            // Self-heal previously-installed hooks (empty-array regression).
-            let _ = hooks_installer::ensure_installed();
-
-            // Drift: watcher loop + Claude-Code event tail.
-            let runtime = Arc::new(Mutex::new(DriftRuntime::new(db_path, config_dir)));
-            drift::start_watcher(app.handle().clone(), runtime.clone());
-            events_tail::start(app.handle().clone(), runtime);
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            browser::refresh(&dir)?;
+            let browser = browser::Shared::default();
+            browser::listen(browser.clone(), app.config().identifier.ends_with(".dev"));
+            // A fresh file: the pre-redesign nube.db (Claude usage) is left untouched.
+            let engine = Arc::new(Mutex::new(Engine::new(dir.join("focus.db"), dir, browser)?));
+            app.manage(AppState { engine: engine.clone() });
+            engine::start(app.handle().clone(), engine);
 
             // System tray (live presence + quick menu).
             let open = MenuItem::with_id(app, "open", "Open Nube Nube", true, None::<&str>)?;
@@ -135,23 +118,22 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::get_projects,
-            commands::get_totals,
+            commands::get_focus,
+            commands::start_timer,
+            commands::stop_timer,
+            commands::set_target,
+            commands::set_day_target,
+            commands::set_day_rest,
             commands::get_insights,
-            commands::get_connection_status,
-            commands::get_project_detail,
-            commands::rescan_logs,
             commands::get_settings,
             commands::save_settings,
-            commands::install_hooks,
-            commands::uninstall_hooks,
+            commands::list_apps,
+            commands::tracking_helper,
+            commands::install_tracking_helper,
+            commands::install_browser_extension,
             commands::nube_open_main,
             commands::nube_set_companion,
             commands::nube_resize_companion,
-            commands::get_known_apps,
-            commands::list_running_apps,
-            commands::install_notification_sound,
-            commands::remove_notification_sound,
             commands::check_update,
             commands::install_update,
         ])

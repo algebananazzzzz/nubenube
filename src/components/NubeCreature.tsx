@@ -2,17 +2,16 @@
 // status-tinted "sky" panel are pure functions of mood/sky props.
 
 import type { CSSProperties, ReactNode } from 'react'
-import type { Mood, Sky as SkyKind } from '../lib/derive'
+import type { Sky as SkyKind } from '../lib/derive'
+import type { Mood } from '../lib/economy'
 
 // sky → status tint behind the creature
 function skyTint(sky: SkyKind): string {
   switch (sky) {
-    case 'good':
-    case 'working': return 'var(--success-surface)'
+    case 'good': return 'var(--success-surface)'
     case 'alert': return 'var(--warning-surface)'
     case 'worried':
     case 'danger': return 'var(--critical-surface)'
-    case 'calm': return 'rgba(120,124,136,.13)'   // paused — neutral grey
     case 'idle': return 'var(--accent-surface)'    // idle — muted indigo
     default: return 'transparent'
   }

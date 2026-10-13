@@ -1,25 +1,34 @@
-//! Tauri command handlers. Each opens a short-lived SQLite connection (WAL
-//! handles concurrent reads/writes with the connector + watcher threads).
+//! Tauri command handlers. Everything stateful goes through the engine mutex so
+//! commands and the 1 s tick never interleave.
 
-use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use rusqlite::Connection;
 use serde::Serialize;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_updater::UpdaterExt;
 
+use crate::db;
+use crate::dto::*;
+use crate::engine::Engine;
 use crate::settings::Settings;
-use crate::{connector, db, dto::*, hooks_installer, store_paths};
 
 pub struct AppState {
-    pub db_path: PathBuf,
-    pub config_dir: PathBuf,
+    pub engine: Arc<Mutex<Engine>>,
 }
 
-/// Open a short-lived DB connection, run `f`, and fall back to `T::default()` if
-/// the open fails (WAL handles concurrency with the connector + drift threads).
-fn with_db<T: Default>(db_path: &Path, f: impl FnOnce(&Connection) -> T) -> T {
-    db::open(db_path).map(|c| f(&c)).unwrap_or_default()
+impl AppState {
+    fn engine(&self) -> MutexGuard<'_, Engine> {
+        self.engine.lock().expect("engine mutex poisoned")
+    }
+}
+
+/// Run `f` on the engine, then broadcast the new state to every window.
+fn mutate<T>(app: &AppHandle, state: &State<AppState>, f: impl FnOnce(&mut Engine) -> Result<T, String>) -> Result<T, String> {
+    let mut e = state.engine();
+    let out = f(&mut e)?;
+    e.emit(app);
+    Ok(out)
 }
 
 /// Reveal + focus the main window (tray, dock-reopen, single-instance, open cmd).
@@ -31,85 +40,80 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
-fn roots_str() -> Vec<String> {
-    store_paths::log_roots()
-        .iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect()
-}
-
-fn conn_status(db_path: &Path) -> ConnectionStatus {
-    let roots = roots_str();
-    let installed = hooks_installer::is_installed();
-    match db::open(db_path) {
-        Ok(c) => db::connection_stats(&c, roots, installed),
-        Err(_) => {
-            let _ = roots;
-            ConnectionStatus {
-                connected: false,
-                projects_detected: 0,
-                sessions_scanned: 0,
-                hooks_installed: installed,
-            }
-        }
-    }
+#[tauri::command]
+pub fn get_focus(state: State<AppState>) -> FocusTick {
+    state.engine().snapshot()
 }
 
 #[tauri::command]
-pub fn get_projects(state: State<AppState>) -> Vec<Project> {
-    with_db(&state.db_path, db::get_projects)
+pub fn start_timer(app: AppHandle, state: State<AppState>, minutes: f64) -> Result<(), String> {
+    mutate(&app, &state, |e| e.start_timer(minutes))
 }
 
 #[tauri::command]
-pub fn get_totals(state: State<AppState>) -> Totals {
-    with_db(&state.db_path, db::get_totals)
+pub fn stop_timer(app: AppHandle, state: State<AppState>) -> Result<f64, String> {
+    mutate(&app, &state, |e| e.stop_timer())
 }
 
 #[tauri::command]
-pub fn get_insights(state: State<AppState>, range: String) -> Insights {
-    match db::open(&state.db_path) {
-        Ok(c) => db::get_insights(&c, &range),
-        Err(_) => Insights { range, ..Default::default() },
-    }
+pub fn set_target(app: AppHandle, state: State<AppState>, secs: f64) -> Result<(), String> {
+    mutate(&app, &state, |e| e.set_target(secs))
 }
 
 #[tauri::command]
-pub fn get_connection_status(state: State<AppState>) -> ConnectionStatus {
-    conn_status(&state.db_path)
+pub fn set_day_target(app: AppHandle, state: State<AppState>, day: usize, secs: Option<f64>) -> Result<(), String> {
+    mutate(&app, &state, |e| e.set_day_target(day, secs))
 }
 
 #[tauri::command]
-pub fn get_project_detail(state: State<AppState>, id: String, range: String) -> Option<ProjectDetail> {
-    with_db(&state.db_path, |c| db::get_project_detail(c, &id, &range))
+pub fn set_day_rest(app: AppHandle, state: State<AppState>, day: usize, secs: f64) -> Result<(), String> {
+    mutate(&app, &state, |e| e.set_day_rest(day, secs))
 }
 
 #[tauri::command]
-pub fn rescan_logs(state: State<AppState>) -> ConnectionStatus {
-    connector::scan_all(&state.db_path);
-    conn_status(&state.db_path)
+pub fn get_insights(state: State<AppState>, range: String) -> Result<Insights, String> {
+    db::insights(state.engine().conn(), &range, chrono::Local::now().naive_local()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn get_settings(state: State<AppState>) -> Settings {
-    crate::settings::load(&state.config_dir)
+    state.engine().settings().clone()
 }
 
 #[tauri::command]
-pub fn save_settings(state: State<AppState>, settings: Settings) -> Settings {
-    crate::settings::save(&state.config_dir, &settings);
-    settings
+pub fn save_settings(state: State<AppState>, settings: Settings) -> Result<Settings, String> {
+    state.engine().save_settings(settings.clone()).map_err(|e| e.to_string())?;
+    Ok(settings)
 }
 
 #[tauri::command]
-pub fn install_hooks(state: State<AppState>) -> ConnectionStatus {
-    let _ = hooks_installer::install();
-    conn_status(&state.db_path)
+pub async fn list_apps(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut apps = crate::installed::list();
+    apps.extend(db::known_apps(state.engine().conn()).map_err(|e| e.to_string())?);
+    apps.sort_by_cached_key(|n| n.to_lowercase());
+    apps.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    Ok(apps)
 }
 
 #[tauri::command]
-pub fn uninstall_hooks(state: State<AppState>) -> ConnectionStatus {
-    let _ = hooks_installer::uninstall();
-    conn_status(&state.db_path)
+pub async fn tracking_helper(app: AppHandle) -> Result<TrackingHelper, String> {
+    crate::gnome::status(&app.path().data_dir().map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+pub async fn install_tracking_helper(app: AppHandle) -> Result<TrackingHelper, String> {
+    crate::gnome::install(&app.path().data_dir().map_err(|e| e.to_string())?)
+}
+
+/// Writes the extension's files and puts their folder on the clipboard for
+/// Chrome's "Load unpacked" picker. Copied here, not in the webview: WebKit
+/// refuses clipboard writes once the click's user activation has passed.
+#[tauri::command]
+pub async fn install_browser_extension(app: AppHandle) -> Result<String, String> {
+    let dir = crate::browser::install(&app.path().app_data_dir().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let dir = dir.to_string_lossy().into_owned();
+    app.clipboard().write_text(dir.clone()).map_err(|e| e.to_string())?;
+    Ok(dir)
 }
 
 // ── desktop companion window ──────────────────────────────────────────────
@@ -213,111 +217,6 @@ pub fn nube_resize_companion(app: AppHandle, width: f64, height: f64) {
         }
         apply_macos_overlay(&w);
     }
-}
-
-#[tauri::command]
-pub fn get_known_apps(state: State<AppState>) -> Vec<KnownApp> {
-    with_db(&state.db_path, db::get_known_apps)
-}
-
-// ── notification sound ────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-pub struct NotificationSoundResult {
-    pub name: String,
-    pub path: String,
-}
-
-const ALLOWED_SOUND_EXTS: &[&str] = &["wav", "mp3", "aiff", "ogg", "flac", "m4a"];
-
-#[tauri::command]
-pub fn install_notification_sound(
-    state: State<AppState>,
-    data: Vec<u8>,
-    ext: String,
-) -> Result<NotificationSoundResult, String> {
-    let ext = ext.to_lowercase();
-    if !ALLOWED_SOUND_EXTS.contains(&ext.as_str()) {
-        return Err(format!("Unsupported audio format: {ext}"));
-    }
-    let sounds_dir = state.config_dir.join("sounds");
-    std::fs::create_dir_all(&sounds_dir)
-        .map_err(|e| format!("Could not create sounds dir: {e}"))?;
-    let filename = format!("nn_alert.{ext}");
-    let dest = sounds_dir.join(&filename);
-    std::fs::write(&dest, &data)
-        .map_err(|e| format!("Could not write sound file: {e}"))?;
-    // macOS: also copy to ~/Library/Sounds so the OS notification can find it by name.
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(home) = dirs::home_dir() {
-            let lib_sounds = home.join("Library/Sounds");
-            let _ = std::fs::create_dir_all(&lib_sounds);
-            let _ = std::fs::copy(&dest, lib_sounds.join(&filename));
-        }
-    }
-    let path_str = dest.to_string_lossy().into_owned();
-    let mut s = crate::settings::load(&state.config_dir);
-    s.notification_sound_name = Some("nn_alert".to_string());
-    s.notification_sound_path = Some(path_str.clone());
-    crate::settings::save(&state.config_dir, &s);
-    Ok(NotificationSoundResult { name: "nn_alert".to_string(), path: path_str })
-}
-
-#[tauri::command]
-pub fn remove_notification_sound(state: State<AppState>) -> Result<(), String> {
-    let mut s = crate::settings::load(&state.config_dir);
-    if let Some(ref path) = s.notification_sound_path.clone() {
-        let p = std::path::Path::new(path);
-        if p.exists() {
-            let _ = std::fs::remove_file(p);
-        }
-        #[cfg(target_os = "macos")]
-        if let Some(filename) = p.file_name() {
-            if let Some(home) = dirs::home_dir() {
-                let _ = std::fs::remove_file(home.join("Library/Sounds").join(filename));
-            }
-        }
-    }
-    s.notification_sound_name = None;
-    s.notification_sound_path = None;
-    crate::settings::save(&state.config_dir, &s);
-    Ok(())
-}
-
-/// Best-effort list of currently-running GUI apps (to pre-populate the picker).
-/// Auto-discovery (known_apps) is the primary source; this is a bonus.
-#[tauri::command]
-pub fn list_running_apps() -> Vec<String> {
-    #[cfg(target_os = "macos")]
-    {
-        let out = std::process::Command::new("osascript")
-            .args(["-e", "tell application \"System Events\" to get name of (every process whose background only is false)"])
-            .output();
-        if let Ok(o) = out {
-            let s = String::from_utf8_lossy(&o.stdout);
-            let mut v: Vec<String> = s.split(", ").map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
-            v.sort();
-            v.dedup();
-            return v;
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(o) = std::process::Command::new("wmctrl").arg("-lx").output() {
-            let s = String::from_utf8_lossy(&o.stdout);
-            let mut v: Vec<String> = s
-                .lines()
-                .filter_map(|l| l.split_whitespace().nth(2)) // WM_CLASS col
-                .filter_map(|c| c.split('.').next_back())
-                .map(|x| x.to_string())
-                .collect();
-            v.sort();
-            v.dedup();
-            return v;
-        }
-    }
-    Vec::new()
 }
 
 // ── self-update (channel-aware) ───────────────────────────────────────────
