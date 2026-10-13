@@ -90,8 +90,10 @@ fn platform_list(me: &str) -> Vec<String> {
         .flat_map(|rd| rd.flatten())
         .filter_map(|e| {
             let p = e.path();
-            (p.extension()? == "app" && !p.join("Contents/MacOS").join(me).exists())
-                .then(|| p.file_stem()?.to_string_lossy().into_owned())?
+            if p.extension()? != "app" || p.join("Contents/MacOS").join(me).exists() {
+                return None;
+            }
+            Some(p.file_stem()?.to_string_lossy().into_owned())
         })
         .collect()
 }
