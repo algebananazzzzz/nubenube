@@ -1,6 +1,6 @@
 // Shared domain types; mirror the Rust DTOs (serde camelCase).
 
-export type FocusStateName = 'idle' | 'timer' | 'timerDrift' | 'drift'
+export type FocusStateName = 'idle' | 'timer' | 'drift'
 
 export type Day = {
   focus: number
@@ -16,6 +16,7 @@ export type Day = {
 export type FocusTick = {
   state: FocusStateName
   app: string
+  appClass: AppClass
   away: boolean
   left: number
   len: number

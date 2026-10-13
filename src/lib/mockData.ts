@@ -40,7 +40,7 @@ function mockWeek(): Day[] {
 
 let tick: FocusTick = (() => {
   const week = mockWeek()
-  return { state: 'timer', app: 'Cursor', away: false, left: 1100, len: 2700, run: 1600, pending: 12, weekday: todayIdx(), week, bank: bankOf(week), extension: false }
+  return { state: 'timer', app: 'Cursor', appClass: 'work', away: false, left: 1100, len: 2700, run: 1600, pending: 12, weekday: todayIdx(), week, bank: bankOf(week), extension: false }
 })()
 
 function bankOf(week: Day[]) {

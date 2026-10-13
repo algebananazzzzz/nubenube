@@ -8,9 +8,11 @@ use crate::economy::Day;
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FocusTick {
-    /// "idle" | "timer" | "timerDrift" | "drift"
+    /// "idle" | "timer" | "drift"
     pub state: String,
     pub app: String,
+    /// "work" | "neutral" | "rest"
+    pub app_class: String,
     /// Away (idle past the threshold): nothing is earned or spent.
     pub away: bool,
     /// Timer seconds left and length; 0 with no timer running.

@@ -5,15 +5,25 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { Sky as SkyKind } from '../lib/derive'
 import type { Mood } from '../lib/economy'
 
-// sky → status tint behind the creature
-function skyTint(sky: SkyKind): string {
+// Idle stays untinted so it never reads as focus (green on a work app, indigo
+// on a neutral one) or rest (amber/red).
+export function skyTint(sky: SkyKind): string {
   switch (sky) {
     case 'good': return 'var(--success-surface)'
-    case 'alert': return 'var(--warning-surface)'
-    case 'worried':
+    case 'focus': return 'var(--accent-surface)'
+    case 'worried': return 'var(--warning-surface)'
     case 'danger': return 'var(--critical-surface)'
-    case 'idle': return 'var(--accent-surface)'    // idle — muted indigo
-    default: return 'transparent'
+    case 'idle': return 'transparent'
+  }
+}
+
+export function skyBorder(sky: SkyKind): string {
+  switch (sky) {
+    case 'good': return 'var(--success-border)'
+    case 'focus': return 'var(--accent-border)'
+    case 'worried': return 'var(--warning-border)'
+    case 'danger': return 'var(--critical-border)'
+    case 'idle': return 'var(--line)'
   }
 }
 
