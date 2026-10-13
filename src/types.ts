@@ -6,7 +6,7 @@ export type Day = {
   focus: number
   distract: number
   earned: number // rest earned, bonuses included
-  spent: number // rest spent, in-timer penalty included
+  spent: number // rest spent on Rest apps and sites
   target: number | null
   hit: boolean
   bonus: number // the daily-target bonus counted in `earned`
@@ -23,7 +23,8 @@ export type FocusTick = {
   pending: number // finish bonus accrued so far
   weekday: number // 0 = Monday
   week: Day[]
-  bank: number
+  bank: number // may go negative
+  extension: boolean // the browser extension is connected
 }
 
 export type FocusEvent =
@@ -37,9 +38,8 @@ export type Site = { domain: string; class: AppClass }
 export type Settings = {
   apps: Record<string, AppClass>
   sites: Site[]
-  shield: { enabled: boolean; subdomains: boolean; dohGuard: boolean }
+  blockSites: boolean
   ratio: number
-  penalty: number
   targetBonusMin: number
   presets: number[]
   finishEvery: number
@@ -62,4 +62,4 @@ export type Insights = {
   restApps: AppSlice[]
 }
 
-export type KnownApp = { name: string; lastSeen: string }
+export type TrackingHelper = 'ok' | 'missing' | 'pending'

@@ -37,7 +37,7 @@ function headline(f: FocusView) {
       bar: f.state === 'timerDrift' ? 'var(--critical)' : hueSwatch(f.phase.hue, f.dark),
     }
   }
-  return { value: fmtHM(Math.max(0, f.bank)), label: 'rest', tone: f.hpTone, pct: f.hp, bar: f.hpTone }
+  return { value: fmtHM(f.bank), label: 'rest', tone: f.hpTone, pct: f.hp, bar: f.hpTone }
 }
 
 function CompanionCard({ f, onMinimize, innerRef }: { f: FocusView; onMinimize: () => void; innerRef: Ref<HTMLDivElement> }) {
@@ -69,7 +69,7 @@ function CompanionCard({ f, onMinimize, innerRef }: { f: FocusView; onMinimize: 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, padding: '7px 9px', borderRadius: 'var(--r-sm)', background: 'var(--surface-faint)', border: '1px solid var(--line-faint)' }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: f.phase.tone, flexShrink: 0 }} />
           <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.phase.name}</span>
-          {f.inTimer && <span className="nn-num" style={{ fontSize: 11.5, color: f.hpTone }}>{fmtHM(Math.max(0, f.bank))}</span>}
+          {f.inTimer && <span className="nn-num" style={{ fontSize: 11.5, color: f.hpTone }}>{fmtHM(f.bank)}</span>}
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 9 }}>
           <Btn variant="soft" size="sm" full onClick={() => void rescue.openMain()}>Open Nube</Btn>

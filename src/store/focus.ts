@@ -14,6 +14,7 @@ const EMPTY: FocusTick = {
   weekday: (new Date().getDay() + 6) % 7,
   week: Array.from({ length: 7 }, () => ({ focus: 0, distract: 0, earned: 0, spent: 0, target: null, hit: false, bonus: 0, restPlan: 0 })),
   bank: 0,
+  extension: false,
 }
 
 export const useFocus = create<FocusStore>((set, get) => ({

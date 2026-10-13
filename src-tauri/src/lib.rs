@@ -3,11 +3,14 @@
 #![allow(unexpected_cfgs)]
 // Nube Nube — native (Rust) entry point.
 
+mod browser;
 mod commands;
 mod db;
 mod dto;
 mod economy;
 mod engine;
+mod gnome;
+mod installed;
 mod notify;
 mod settings;
 mod watcher;
@@ -71,8 +74,11 @@ pub fn run() {
 
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
+            browser::refresh(&dir)?;
+            let browser = browser::Shared::default();
+            browser::listen(browser.clone(), app.config().identifier.ends_with(".dev"));
             // A fresh file: the pre-redesign nube.db (Claude usage) is left untouched.
-            let engine = Arc::new(Mutex::new(Engine::new(dir.join("focus.db"), dir)?));
+            let engine = Arc::new(Mutex::new(Engine::new(dir.join("focus.db"), dir, browser)?));
             app.manage(AppState { engine: engine.clone() });
             engine::start(app.handle().clone(), engine);
 
@@ -124,8 +130,10 @@ pub fn run() {
             commands::get_insights,
             commands::get_settings,
             commands::save_settings,
-            commands::get_known_apps,
-            commands::list_running_apps,
+            commands::list_apps,
+            commands::tracking_helper,
+            commands::install_tracking_helper,
+            commands::install_browser_extension,
             commands::nube_open_main,
             commands::nube_set_companion,
             commands::nube_resize_companion,

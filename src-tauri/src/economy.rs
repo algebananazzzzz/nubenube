@@ -1,6 +1,6 @@
 //! The focus economy. Time inside a running timer earns rest at 1/ratio per
-//! second; a Rest app spends it (1:1 outside a timer, `penalty`× inside one);
-//! the weekly bank is Σ(earned − spent) since Monday. Pure, so the rules are
+//! second; a Rest app or site spends it 1:1; the weekly bank is
+//! Σ(earned − spent) since Monday and may go negative. Pure, so the rules are
 //! tested apart from the OS watcher and the database.
 
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,6 @@ pub fn finish_at(run_secs: f64, every_min: f64) -> f64 {
 #[derive(Clone, Copy)]
 pub struct Rules {
     pub ratio: f64,
-    pub penalty: f64,
     pub target_bonus_secs: f64,
     pub finish_every_min: f64,
 }
@@ -36,7 +35,7 @@ pub struct Day {
     pub distract: f64,
     /// Rest earned, at the ratio in effect when it was earned, plus all bonuses.
     pub earned: f64,
-    /// Rest spent, including the in-timer penalty.
+    /// Rest spent on Rest apps and sites, in or out of a timer.
     pub spent: f64,
     pub target: Option<f64>,
     pub hit: bool,
@@ -126,7 +125,7 @@ pub fn step(timer: &mut Option<Timer>, day: &mut Day, rules: &Rules, fg: Foregro
         Foreground::Rest => {
             t.run = 0.0;
             day.distract += dt;
-            day.spent += rules.penalty * dt;
+            day.spent += dt;
         }
         Foreground::Away => {}
     }
@@ -149,7 +148,7 @@ pub fn bank(week: &[Day]) -> f64 {
 mod tests {
     use super::*;
 
-    const R: Rules = Rules { ratio: 5.0, penalty: 3.0, target_bonus_secs: 1800.0, finish_every_min: 15.0 };
+    const R: Rules = Rules { ratio: 5.0, target_bonus_secs: 1800.0, finish_every_min: 15.0 };
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-6
@@ -190,13 +189,13 @@ mod tests {
     }
 
     #[test]
-    fn drifting_in_a_timer_costs_penalty_and_resets_the_climb() {
+    fn drifting_in_a_timer_spends_one_to_one_and_resets_the_climb() {
         let mut t = Some(Timer::new(60.0));
         let mut d = Day::default();
         run(&mut t, &mut d, Foreground::Focus, 1000);
         assert_eq!(finish_tier(t.as_ref().unwrap().run, 15.0), 1);
         run(&mut t, &mut d, Foreground::Rest, 10);
-        assert!(close(d.spent, 30.0));
+        assert!(close(d.spent, 10.0));
         assert!(close(t.as_ref().unwrap().run, 0.0));
     }
 

@@ -1,19 +1,16 @@
-// Insights: work vs rest over time, totals, top apps, and (mock, until the
-// shield exists) site blocking.
+// Insights: work vs rest over time, totals, and the top apps and sites.
 
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { useFocusView, useRules } from '../lib/derive'
 import { FINISH, finishTier } from '../lib/economy'
-import { mockBlocking } from '../lib/mockData'
 import { fmtHM } from '../lib/format'
 import { say } from '../store/toast'
-import { Avatar, Bar, Card, Eyebrow, SegTabs, ShieldIcon, SoonPill, Stat } from '../components/ui'
+import { Avatar, Bar, Card, Eyebrow, SegTabs, Stat } from '../components/ui'
 import type { AppSlice, Insights as InsightsT, RangeKey, SeriesPoint } from '../types'
 
 const RANGES: { key: RangeKey; label: string }[] = [{ key: 'today', label: 'Today' }, { key: 'week', label: 'This week' }, { key: 'month', label: 'This month' }]
 const BUCKET_SECS: Record<RangeKey, number> = { today: 900, week: 7200, month: 86400 }
-const RANGE_WORD: Record<RangeKey, string> = { today: 'today', week: 'this week', month: 'this month' }
 
 // Finish-bonus step reached by the end of each bucket, for the tooltip. A gap
 // or a rest-heavy bucket breaks the run.
@@ -120,31 +117,6 @@ function SourceList({ title, rows, tone, total }: { title: string; rows: AppSlic
   )
 }
 
-function BlockingCard({ range }: { range: RangeKey }) {
-  const k = range === 'month' ? 14.6 : range === 'today' ? 1 : 3.4
-  return (
-    <Card pad={20}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <ShieldIcon size={14} color="var(--success)" filled />
-        <Eyebrow style={{ fontSize: 11, flex: 1 }}>Blocking · {RANGE_WORD[range]}</Eyebrow>
-        <SoonPill />
-      </div>
-      <div style={{ opacity: 0.55 }}>
-        <Stat value={Math.round(mockBlocking.today * k)} label="sites blocked" size={24} />
-        <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 9 }}>
-          {mockBlocking.top.map((b) => (
-            <div key={b.domain} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className="nn-mono" style={{ fontSize: 12, color: 'var(--text)', width: 110, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.domain}</span>
-              <div style={{ flex: 1 }}><Bar pct={b.n / mockBlocking.top[0].n} color="var(--warning)" height={4} /></div>
-              <span className="nn-num" style={{ fontSize: 11.5, color: 'var(--faint)', width: 36, textAlign: 'right' }}>{Math.round(b.n * k)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Card>
-  )
-}
-
 export function Insights() {
   const f = useFocusView(), s = useRules()
   const [range, setRange] = useState<RangeKey>('today')
@@ -191,7 +163,6 @@ export function Insights() {
         <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 10 }}>Gaps are when you were away.</div>
       </Card>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 14 }}>
-        <BlockingCard range={range} />
         <SourceList title="Work breakdown" rows={data?.focusApps ?? []} tone="var(--success)" total={focus} />
         <SourceList title="Rest breakdown" rows={data?.restApps ?? []} tone="var(--critical)" total={distract} />
       </div>

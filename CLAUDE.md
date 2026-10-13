@@ -5,8 +5,8 @@ Guidance for working in this repo.
 ## What this is
 
 NubeNube: a Tauri 2 desktop focus companion. Time inside a running focus timer
-earns rest at a work:rest ratio; time on a Rest-class app spends it (1:1 outside
-a timer, `penalty`× inside one). Rest banks weekly (resets Monday). A daily
+earns rest at a work:rest ratio; time on a Rest-class app or site spends it
+1:1, and the bank may go negative. Rest banks weekly (resets Monday). A daily
 target pays a bonus when hit; a per-timer finish multiplier pays when the timer
 runs out. A cloud creature (the *Nube*) reflects today's pace. Local-first, no
 accounts, no network calls for tracking.
@@ -14,9 +14,9 @@ accounts, no network calls for tracking.
 - **Frontend:** React 19 + TypeScript, Vite 8, react-router 7 (HashRouter), zustand 5.
 - **Backend:** Rust (Tauri), in `src-tauri/`: economy, 1 s engine tick, SQLite, foreground-app watcher.
 
-Website tracking and the DNS site shield are designed but NOT built: their UI
-(Apps & Sites sites list + shield card, Insights blocking card) persists
-settings or shows `mockBlocking` and carries a "Coming soon" pill.
+Websites are tracked and blocked by a bundled Chromium extension
+(`src-tauri/browser-extension/`, loaded unpacked) that talks to the app over a
+localhost WebSocket. Rest sites are hard-blocked only while a timer runs.
 
 ## Commands
 
@@ -42,7 +42,7 @@ Do NOT rely on `npm run lint`; the lint config is pre-broken and not a signal.
   - `Companion.tsx` — always-on-top transparent window; content-sized via a
     ResizeObserver that reports its size to Rust (`nube_resize_companion`). Sole chime owner.
   - `NubeCreature.tsx` — `Sky` (status-tinted panel) + `Nube` (the creature).
-  - `ui.tsx`: primitives (`Card, Pill, Btn, Toggle, SegTabs, Section, PrefRow, Slider, Ring, Bar, Tile, Stat, Avatar, ClassSwitch, SoonPill`, …).
+  - `ui.tsx`: primitives (`Card, Pill, Btn, Toggle, SegTabs, Section, PrefRow, Slider, Ring, Bar, Tile, Stat, Avatar, ClassSwitch`, …).
 - `pages/`: `Home`, `Insights`, `Rules`, `Sources` (Apps & Sites), `Settings`.
 - `lib/`
   - `api.ts`: the only bridge to Rust (`invoke`). Inside Tauri, errors propagate
@@ -89,11 +89,24 @@ Do NOT rely on `npm run lint`; the lint config is pre-broken and not a signal.
   15-minute `slots`, `app_time`, `known_apps`, `meta`; `insights()` buckets.
 - `settings.rs`: `settings.json`; apps map name → `work|neutral|rest`
   (exact, case-insensitive match); folds the old `distractionApps`/`workApps` on load.
-- `watcher.rs`: frontmost app + idle seconds. `notify.rs`: OS notifications.
+- `watcher.rs`: frontmost app + idle seconds; NubeNube's own windows (matched
+  by pid) read as no app. `notify.rs`: OS notifications.
+- `gnome.rs` + `gnome-extension/`: GNOME on Wayland hides the focused window,
+  so a bundled Shell extension reports it over D-Bus. Installed from Apps &
+  Sites; loads only after the user logs out and back in.
+- `browser.rs` + `browser-extension/`: WebSocket on `127.0.0.1:47615`
+  (`make dev`: 47616), accepting only the extension's pinned origin (the
+  manifest `key` fixes its id). The extension reports the focused window's
+  site, which overrides the app's class when listed (longest suffix match); the
+  engine sends back the Rest domains to block while a timer runs.
+  `install_browser_extension` writes the files to the app data dir.
+- `installed.rs`: installed apps (.desktop files / .app bundles) for the Apps &
+  Sites search, named as the watcher reports them.
 
 Commands (see `commands.rs`): `get_focus`, `start_timer`, `stop_timer`,
 `set_target` (raise-only), `set_day_target`, `set_day_rest`, `get_insights`,
-`get_settings`, `save_settings`, `get_known_apps`, `list_running_apps`, the
+`get_settings`, `save_settings`, `list_apps`,
+`tracking_helper`, `install_tracking_helper`, `install_browser_extension`, the
 window controls `nube_open_main` / `nube_set_companion` / `nube_resize_companion`,
 and `check_update` / `install_update`. Events: `focus-tick` (every second) and
 `focus-event` (`timerFinished`, `targetHit`).

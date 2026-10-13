@@ -24,12 +24,8 @@ pub fn timer_done(app: &AppHandle, earned: f64) {
     show(app, "Focus session done", format!("+{} rest earned. Nice work. ☁️", fmt_hm(earned)));
 }
 
-pub fn drifted(app: &AppHandle, app_name: &str, penalty: f64) {
-    show(
-        app,
-        "You drifted mid-session",
-        format!("{app_name} is burning rest {penalty}× faster while your timer runs. Come back when you can."),
-    );
+pub fn drifted(app: &AppHandle, app_name: &str) {
+    show(app, "You drifted mid-session", format!("{app_name} is spending your rest. Come back when you can."));
 }
 
 #[cfg(test)]

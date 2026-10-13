@@ -43,6 +43,9 @@ chrono = { version = "0.4", features = ["clock"] }
 active-win-pos-rs = "0.11"
 user-idle = "0.6"
 
+# Localhost WebSocket for the Chromium extension (site tracking + blocking).
+tungstenite = "0.29"
+
 # macOS: native NSWindow tweaks for the companion overlay — float over full-screen
 # apps + all Spaces (fullScreenAuxiliary) and drag by the window background.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -52,3 +55,8 @@ objc = "0.2"
 # XScreenSaver (user-idle's X11 backend) does not.
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus = "0.9"
+
+# Recomputes the extension id from its manifest key in browser.rs tests.
+[dev-dependencies]
+base64 = "0.22"
+sha2 = "0.10"

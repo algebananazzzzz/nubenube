@@ -17,7 +17,7 @@ Local-first. No accounts, no servers, no telemetry. NubeNube watches which app i
 ## How it behaves
 
 - **Focus earns rest.** Time inside a running timer earns rest at your work:rest ratio (5:1 by default, so 45 minutes of focus earns 9 minutes of rest).
-- **Rest apps spend it.** Mark apps as Rest and every minute on them comes out of your bank. Mid-timer it costs 3× and resets your focus multiplier.
+- **Rest apps spend it.** Mark apps as Rest and every minute on them comes out of your bank. Mid-timer it also resets your focus multiplier. The bank can go negative.
 - **Long stretches pay more.** Unbroken focus climbs a multiplier (×1.15, ×1.3, ×1.5) every 15 minutes. The bonus is paid when the timer finishes; stopping early forfeits it.
 - **Daily targets.** Pick how long you want to work today. Hit it and you earn a bonus. You can raise a target, never lower it.
 - **A weekly bank.** Rest accumulates Monday to Sunday and resets each Monday, so focused weekdays buy a lazy weekend.
@@ -59,7 +59,7 @@ Below the hero:
 
 ### Insights
 
-![Insights: work and rest over time, blocking, and per-app breakdowns](docs/images/insights.png)
+![Insights: work and rest over time and per-app breakdowns](docs/images/insights.png)
 
 Work above the line, rest below, in 15-minute cells for today, 2-hour buckets for the week, or days for the month. Gaps are when you were away. Hover a bar for its numbers and the multiplier you'd reached. The breakdown cards rank the apps you focused in and the apps you rested on.
 
@@ -75,7 +75,7 @@ The numbers behind the economy: the work:rest ratio, how often the focus multipl
 
 Classify each app as **Work**, **Neutral** or **Rest**. Only Rest changes the economy: Work and Neutral both count as focus inside a timer, and the class is what the Insights breakdowns group by. **Scan apps** adds every app NubeNube has seen in front plus whatever is running now.
 
-Website tracking and a local DNS shield that blocks Rest sites during timers are designed but not built yet. Their cards are marked *Coming soon*, and your website list is saved for when they land.
+Websites work the same way through the Nube Nube extension for Chrome and other Chromium browsers: **Set up** on the Websites tab writes it to disk, then load it from `chrome://extensions` with Developer mode on and **Load unpacked**. The site in your focused tab takes the place of the browser's own class, and while a timer runs, Rest sites (and their subdomains) are blocked. A blocked tab returns to its page when the timer ends.
 
 ### Desktop companion
 

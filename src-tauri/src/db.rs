@@ -115,9 +115,9 @@ pub fn record_known_app(conn: &Connection, app_name: &str) -> rusqlite::Result<(
     .map(|_| ())
 }
 
-pub fn get_known_apps(conn: &Connection) -> rusqlite::Result<Vec<KnownApp>> {
-    let mut stmt = conn.prepare("SELECT app_name, last_seen FROM known_apps ORDER BY last_seen DESC")?;
-    let rows = stmt.query_map([], |r| Ok(KnownApp { name: r.get(0)?, last_seen: r.get(1)? }))?;
+pub fn known_apps(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT app_name FROM known_apps")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
     rows.collect()
 }
 

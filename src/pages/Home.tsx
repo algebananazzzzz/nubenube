@@ -10,7 +10,6 @@ import { DAYS, fmtCountdown, fmtHM } from '../lib/format'
 import { say } from '../store/toast'
 import { Sky, Nube } from '../components/NubeCreature'
 import { Bar, Btn, Card, Dot, Eyebrow, Pill, Ring, Section, Tile } from '../components/ui'
-import type { Settings } from '../types'
 
 const report = (e: unknown) => say(String(e))
 const startTimer = (min: number) => api.startTimer(min).catch(report)
@@ -24,11 +23,11 @@ const setDayRest = (day: number, secs: number) => api.setDayRest(day, secs).catc
 
 const presetLabel = (m: number) => (m >= 60 && m % 60 === 0 ? `${m / 60}h` : `${m}m`)
 
-function heroCopy(f: FocusView, s: Settings): { title: string; line: string; tone: string; pulse: boolean } {
+function heroCopy(f: FocusView): { title: string; line: string; tone: string; pulse: boolean } {
   if (f.away) return { title: 'Away', line: "Tracking pauses while you're away, so nothing is earned or spent.", tone: 'var(--faint)', pulse: false }
   switch (f.state) {
-    case 'timer': return { title: `Focusing · ${f.app || 'NubeNube'}`, line: `Rest apps cost ${s.penalty}× until the timer ends.`, tone: hueSwatch(f.phase.hue, f.dark), pulse: true }
-    case 'timerDrift': return { title: `Drifted to ${f.app}`, line: `You're burning rest ${s.penalty}× faster. Get back to it!`, tone: 'var(--critical)', pulse: true }
+    case 'timer': return { title: `Focusing · ${f.app || 'NubeNube'}`, line: f.extension ? 'Rest sites are blocked until the timer ends.' : 'Rest apps spend your rest, and the timer keeps running.', tone: hueSwatch(f.phase.hue, f.dark), pulse: true }
+    case 'timerDrift': return { title: `Drifted to ${f.app}`, line: "This is spending your rest and resets your multiplier. Get back to it!", tone: 'var(--critical)', pulse: true }
     case 'drift': return { title: `On ${f.app}`, line: 'No session running, so this comes out of your earned rest.', tone: f.hp < 0.15 ? 'var(--critical)' : 'var(--warning)', pulse: true }
     default: return f.today.hit
       ? { title: 'Target hit', line: 'Nice! Anything more is extra rest earned.', tone: 'var(--success)', pulse: false }
@@ -65,13 +64,13 @@ function FinishPips({ tier, active, every, dark }: { tier: number; active: boole
 
 function Hero() {
   const f = useFocusView(), s = useRules()
-  const cue = heroCopy(f, s)
+  const cue = heroCopy(f)
   const big = f.inTimer ? fmtCountdown(f.left) : '−1×'
   const bigTone = f.state === 'timer' ? 'var(--ink)' : f.state === 'timerDrift' ? 'var(--critical)' : 'var(--warning)'
   const prog = f.inTimer ? 1 - f.left / Math.max(1, f.len) : 0
   const eyebrow = f.inTimer ? `Timer · ${Math.round(f.len / 60)} min` : f.state === 'drift' ? 'Spending rest' : 'Start focusing'
   const earning = f.state === 'timer' ? `Finish to earn +${fmtHM(f.len / s.ratio)} rest, +${fmtHM(f.projected)} bonus`
-    : f.state === 'timerDrift' ? `Losing ${s.penalty} min of rest per minute` : null
+    : f.state === 'timerDrift' ? 'Spending 1 min of rest per minute' : null
   const preset = s.presets[1] ?? s.presets[0] ?? 45
   return (
     <Card pad={0} style={{ overflow: 'hidden', display: 'flex', flexWrap: 'wrap', minHeight: 320 }}>
@@ -137,8 +136,8 @@ function RestBank() {
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
         <div>
-          <div className="nn-num" style={{ fontSize: 44, fontWeight: 700, color: f.hpTone, lineHeight: 0.9, transition: 'color .4s' }}>{f.bank <= 0 ? '0m' : fmtHM(f.bank)}</div>
-          <div style={{ fontSize: 13, color: 'var(--text)', marginTop: 8 }}>{f.bank <= 0 ? "You're out of rest. Work to earn more." : `earned in ${f.weekday + 1} day${f.weekday ? 's' : ''}`}</div>
+          <div className="nn-num" style={{ fontSize: 44, fontWeight: 700, color: f.hpTone, lineHeight: 0.9, transition: 'color .4s' }}>{fmtHM(f.bank)}</div>
+          <div style={{ fontSize: 13, color: 'var(--text)', marginTop: 8 }}>{f.bank < 0 ? `${fmtHM(-f.bank)} over. Focus to earn it back.` : f.bank === 0 ? "You're out of rest. Work to earn more." : `earned in ${f.weekday + 1} day${f.weekday ? 's' : ''}`}</div>
         </div>
         <span style={{ flex: 1 }} />
         <div style={{ textAlign: 'right', paddingBottom: 2 }}>

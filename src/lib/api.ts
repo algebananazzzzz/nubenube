@@ -4,8 +4,8 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { FocusEvent, FocusTick, Insights, KnownApp, RangeKey, Settings } from '../types'
-import { mockEngine, mockInsights, mockKnownApps, mockSettings } from './mockData'
+import type { FocusEvent, FocusTick, Insights, RangeKey, Settings, TrackingHelper } from '../types'
+import { mockApps, mockEngine, mockInsights, mockSettings } from './mockData'
 
 export const isTauri =
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in (window as unknown as object)
@@ -25,8 +25,10 @@ export const api = {
   getInsights: (range: RangeKey) => call<Insights>('get_insights', { range }, () => mockInsights(range)),
   getSettings: () => call<Settings>('get_settings', {}, () => mockSettings),
   saveSettings: (settings: Settings) => call<Settings>('save_settings', { settings }, () => settings),
-  getKnownApps: () => call<KnownApp[]>('get_known_apps', {}, () => mockKnownApps),
-  listRunningApps: () => call<string[]>('list_running_apps', {}, () => mockKnownApps.map((a) => a.name)),
+  listApps: () => call<string[]>('list_apps', {}, () => mockApps),
+  trackingHelper: () => call<TrackingHelper>('tracking_helper', {}, () => 'ok'),
+  installTrackingHelper: () => call<TrackingHelper>('install_tracking_helper', {}, () => 'ok'),
+  installBrowserExtension: () => call<string>('install_browser_extension', {}, () => '~/.local/share/com.nubenube.app/chrome-extension'),
 }
 
 function subscribe<T>(event: string, cb: (payload: T) => void, mock: (cb: (payload: T) => void) => () => void): Promise<UnlistenFn> {

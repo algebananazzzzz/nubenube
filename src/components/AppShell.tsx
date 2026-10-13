@@ -56,7 +56,7 @@ function SideChip() {
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-            <span className="nn-num" style={{ fontSize: 14, fontWeight: 700, color: f.hpTone, lineHeight: 1, whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtHM(Math.max(0, f.bank))}</span>
+            <span className="nn-num" style={{ fontSize: 14, fontWeight: 700, color: f.hpTone, lineHeight: 1, whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtHM(f.bank)}</span>
             <span style={{ fontSize: 11, color: 'var(--faint)', whiteSpace: 'nowrap' }}>rest</span>
           </div>
           <div style={{ fontSize: 11, fontWeight: 600, color: f.phase.tone, marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.phase.name}</div>

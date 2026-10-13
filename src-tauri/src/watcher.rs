@@ -2,8 +2,8 @@
 //!
 //! macOS: app name needs NO permission (window title needs Screen Recording, so
 //! it may be empty); idle via CGEventSource needs NO permission.
-//! Linux: X11 full; Wayland best-effort (app name may be empty), idle via
-//! Mutter on GNOME.
+//! Linux: X11 full; GNOME Wayland through the bundled Shell extension
+//! (`gnome.rs`), other Wayland compositors best-effort; idle via Mutter on GNOME.
 
 pub struct Snapshot {
     pub app_name: String,
@@ -11,11 +11,22 @@ pub struct Snapshot {
 }
 
 pub fn snapshot() -> Snapshot {
-    let app_name = match active_win_pos_rs::get_active_window() {
-        Ok(w) => w.app_name,
-        Err(_) => String::new(),
-    };
-    Snapshot { app_name, idle_secs: idle_secs() }
+    Snapshot { app_name: foreground_app(), idle_secs: idle_secs() }
+}
+
+/// NubeNube's own windows read as no app. Matched by pid: the name differs per platform.
+fn foreground_app() -> String {
+    match focused_window() {
+        Some((name, pid)) if pid != u64::from(std::process::id()) => name,
+        _ => String::new(),
+    }
+}
+
+fn focused_window() -> Option<(String, u64)> {
+    if let Some((name, pid)) = crate::gnome::needed().then(crate::gnome::focused).flatten() {
+        return Some((name, pid.into()));
+    }
+    active_win_pos_rs::get_active_window().ok().map(|w| (w.app_name, w.process_id))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -34,7 +45,7 @@ fn idle_secs() -> u64 {
     use std::sync::atomic::{AtomicBool, Ordering};
     static X11_FAILED: AtomicBool = AtomicBool::new(false);
 
-    if let Some(ms) = mutter_idle_ms() {
+    if let Some(ms) = crate::gnome::idle_ms() {
         return ms / 1000;
     }
     if !X11_FAILED.load(Ordering::Relaxed) {
@@ -47,21 +58,4 @@ fn idle_secs() -> u64 {
         }
     }
     0
-}
-
-#[cfg(target_os = "linux")]
-fn mutter_idle_ms() -> Option<u64> {
-    use dbus::blocking::Connection;
-    use std::time::Duration;
-
-    let conn = Connection::new_session().ok()?;
-    let proxy = conn.with_proxy(
-        "org.gnome.Mutter.IdleMonitor",
-        "/org/gnome/Mutter/IdleMonitor/Core",
-        Duration::from_millis(500),
-    );
-    let (ms,): (u64,) = proxy
-        .method_call("org.gnome.Mutter.IdleMonitor", "GetIdletime", ())
-        .ok()?;
-    Some(ms)
 }

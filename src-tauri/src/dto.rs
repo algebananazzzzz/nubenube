@@ -22,6 +22,8 @@ pub struct FocusTick {
     pub weekday: usize,
     pub week: Vec<Day>,
     pub bank: f64,
+    /// The browser extension is connected, so sites are tracked and blocked.
+    pub extension: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -55,9 +57,11 @@ pub struct Insights {
     pub rest_apps: Vec<AppSlice>,
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct KnownApp {
-    pub name: String,
-    pub last_seen: String,
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum TrackingHelper {
+    Ok,
+    Missing,
+    /// Installed and enabled; GNOME loads it at the next login.
+    Pending,
 }

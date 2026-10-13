@@ -86,43 +86,29 @@ pub fn save_settings(state: State<AppState>, settings: Settings) -> Result<Setti
 }
 
 #[tauri::command]
-pub fn get_known_apps(state: State<AppState>) -> Result<Vec<KnownApp>, String> {
-    db::get_known_apps(state.engine().conn()).map_err(|e| e.to_string())
+pub async fn list_apps(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut apps = crate::installed::list();
+    apps.extend(db::known_apps(state.engine().conn()).map_err(|e| e.to_string())?);
+    apps.sort_by_cached_key(|n| n.to_lowercase());
+    apps.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    Ok(apps)
 }
 
-/// Best-effort list of currently-running GUI apps for "Scan apps"; the apps the
-/// watcher has already seen are the primary source.
 #[tauri::command]
-pub fn list_running_apps() -> Vec<String> {
-    #[cfg(target_os = "macos")]
-    {
-        let out = std::process::Command::new("osascript")
-            .args(["-e", "tell application \"System Events\" to get name of (every process whose background only is false)"])
-            .output();
-        if let Ok(o) = out {
-            let s = String::from_utf8_lossy(&o.stdout);
-            let mut v: Vec<String> = s.split(", ").map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
-            v.sort();
-            v.dedup();
-            return v;
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(o) = std::process::Command::new("wmctrl").arg("-lx").output() {
-            let s = String::from_utf8_lossy(&o.stdout);
-            let mut v: Vec<String> = s
-                .lines()
-                .filter_map(|l| l.split_whitespace().nth(2)) // WM_CLASS col
-                .filter_map(|c| c.split('.').next_back())
-                .map(|x| x.to_string())
-                .collect();
-            v.sort();
-            v.dedup();
-            return v;
-        }
-    }
-    Vec::new()
+pub async fn tracking_helper(app: AppHandle) -> Result<TrackingHelper, String> {
+    crate::gnome::status(&app.path().data_dir().map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+pub async fn install_tracking_helper(app: AppHandle) -> Result<TrackingHelper, String> {
+    crate::gnome::install(&app.path().data_dir().map_err(|e| e.to_string())?)
+}
+
+/// Writes the extension's files and returns their folder for Chrome's "Load unpacked".
+#[tauri::command]
+pub async fn install_browser_extension(app: AppHandle) -> Result<String, String> {
+    let dir = crate::browser::install(&app.path().app_data_dir().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().into_owned())
 }
 
 // ── desktop companion window ──────────────────────────────────────────────

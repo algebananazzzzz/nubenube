@@ -273,8 +273,3 @@ export function Stat({ value, label, color = 'var(--ink)', size = 28 }: { value:
     </div>
   )
 }
-
-// Marks UI whose backend isn't built yet (site tracking + the DNS shield).
-export function SoonPill() {
-  return <Pill tone="ghost" style={{ fontSize: 11 }}>Coming soon</Pill>
-}

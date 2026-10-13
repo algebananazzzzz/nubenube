@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blocked · Nube Nube</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #f6f5f2; --ink: #22211f; --faint: #77736c; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #16171a; --ink: #ecebe8; --faint: #8d8a84; } }
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 420px; padding: 24px; text-align: center; }
+    img { width: 72px; height: 72px; }
+    h1 { font-size: 22px; margin: 12px 0 6px; }
+    p { margin: 0; color: var(--faint); }
+    code { font: 600 14px ui-monospace, "SF Mono", monospace; color: var(--ink); }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="icon.png" alt="">
+    <h1>Back to it</h1>
+    <p><code id="site">This site</code> is blocked until your focus timer ends. This tab comes back on its own when it does.</p>
+  </main>
+  <script src="blocked.js"></script>
+</body>
+</html>

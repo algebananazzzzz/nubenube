@@ -4,7 +4,7 @@
 
 import { finishAt } from './economy'
 import { DAYS } from './format'
-import type { AppSlice, Day, FocusEvent, FocusTick, Insights, KnownApp, RangeKey, SeriesPoint, Settings } from '../types'
+import type { AppSlice, Day, FocusEvent, FocusTick, Insights, RangeKey, SeriesPoint, Settings } from '../types'
 
 export const mockSettings: Settings = {
   apps: {
@@ -14,14 +14,14 @@ export const mockSettings: Settings = {
   },
   sites: [
     ...['youtube.com', 'reddit.com', 'x.com', 'instagram.com', 'tiktok.com'].map((domain) => ({ domain, class: 'rest' as const })),
-    { domain: 'github.com', class: 'work' }, { domain: 'docs.google.com', class: 'work' }, { domain: 'mail.google.com', class: 'neutral' },
+    ...['github.com', 'gitlab.com', 'stackoverflow.com', 'developer.mozilla.org', 'docs.google.com', 'notion.so', 'figma.com', 'linear.app', 'atlassian.net', 'claude.ai', 'chatgpt.com', 'overleaf.com'].map((domain) => ({ domain, class: 'work' as const })),
+    { domain: 'mail.google.com', class: 'neutral' },
   ],
-  shield: { enabled: true, subdomains: true, dohGuard: true },
-  ratio: 5, penalty: 3, targetBonusMin: 30, presets: [25, 45, 60, 90], finishEvery: 15,
+  blockSites: true,
+  ratio: 5, targetBonusMin: 30, presets: [25, 45, 60, 90], finishEvery: 15,
 }
 
-export const mockKnownApps: KnownApp[] = ['Cursor', 'Ghostty', 'Google Chrome', 'Slack', 'Telegram', 'Mail', 'Visual Studio Code']
-  .map((name) => ({ name, lastSeen: new Date().toISOString() }))
+export const mockApps = ['Calculator', 'Cursor', 'Discord', 'Files', 'Firefox', 'Ghostty', 'Google Chrome', 'Mail', 'Obsidian', 'Slack', 'Spotify', 'Steam', 'Telegram', 'Visual Studio Code']
 
 const todayIdx = () => (new Date().getDay() + 6) % 7
 
@@ -40,7 +40,7 @@ function mockWeek(): Day[] {
 
 let tick: FocusTick = (() => {
   const week = mockWeek()
-  return { state: 'timer', app: 'Cursor', away: false, left: 1100, len: 2700, run: 1600, pending: 12, weekday: todayIdx(), week, bank: bankOf(week) }
+  return { state: 'timer', app: 'Cursor', away: false, left: 1100, len: 2700, run: 1600, pending: 12, weekday: todayIdx(), week, bank: bankOf(week), extension: false }
 })()
 
 function bankOf(week: Day[]) {
@@ -170,10 +170,4 @@ export function mockInsights(range: RangeKey): Insights {
     targetsHit: Math.round(days * 0.7), targetDays: days,
     focusApps: scale(FOCUS_APPS), restApps: scale(REST_APPS),
   }
-}
-
-// Mock numbers for the site shield, which isn't built yet.
-export const mockBlocking = {
-  today: 214,
-  top: [{ domain: 'youtube.com', n: 96 }, { domain: 'reddit.com', n: 61 }, { domain: 'x.com', n: 31 }, { domain: 'twitch.tv', n: 26 }],
 }

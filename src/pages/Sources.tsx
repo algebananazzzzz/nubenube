@@ -1,21 +1,25 @@
-// Apps & Sites: classify apps and websites as Work / Neutral / Rest. App
-// tracking is live; website tracking and the DNS shield are UI-only for now.
+// Apps & Sites: classify apps and websites as Work / Neutral / Rest. Sites are
+// tracked and blocked through the Chrome extension (src-tauri/browser-extension).
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../lib/api'
+import { useFocus } from '../store/focus'
 import { useSettings } from '../store/settings'
 import { say } from '../store/toast'
-import { Avatar, Btn, Card, ClassSwitch, Dot, Pill, PrefRow, SegTabs, Section, ShieldIcon, SoonPill, Toggle } from '../components/ui'
-import type { AppClass, Settings } from '../types'
+import { Avatar, Btn, Card, ClassSwitch, Dot, Pill, PrefRow, SegTabs, Section, ShieldIcon, Toggle } from '../components/ui'
+import type { AppClass, Settings, TrackingHelper } from '../types'
 
 const ORDER: Record<AppClass, number> = { rest: 0, neutral: 1, work: 2 }
 
-function WatchCard() {
+const STATUS = { active: ['var(--success)', 'Active'], setup: ['var(--warning)', 'Needs setup'], off: ['var(--faint)', 'Off'] } as const
+
+function WatchCard({ helper, extension, blockSites }: { helper: TrackingHelper; extension: boolean; blockSites: boolean }) {
+  const ext = extension ? 'active' : 'setup'
   const rows = [
-    { t: 'Apps', h: 'Frontmost app', d: 'Tracks whichever app is in front. No permissions needed.', live: true },
-    { t: 'Websites', h: 'Active browser tab', d: 'Reads the current tab in your browser.', live: false },
-    { t: 'Blocking', h: 'Local DNS shield', d: "Rest sites won't load in any browser or app while a timer runs.", live: false },
-  ]
+    { t: 'Apps', h: 'Frontmost app', d: 'Tracks whichever app is in front. No permissions needed.', status: helper === 'ok' ? 'active' : 'setup' },
+    { t: 'Websites', h: 'Active browser tab', d: 'The Chrome extension reports the site in front. Unlisted sites count as the browser.', status: ext },
+    { t: 'Blocking', h: 'Chrome extension', d: "Rest sites won't load in Chrome while a timer runs.", status: blockSites ? ext : 'off' },
+  ] as const
   return (
     <Card pad={20}>
       <Section>How tracking works</Section>
@@ -25,9 +29,9 @@ function WatchCard() {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 1 }}>{r.h}</span>
-              {r.live
-                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600, color: 'var(--success)' }}><Dot tone="var(--success)" size={6} />Active</span>
-                : <SoonPill />}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600, color: STATUS[r.status][0] }}>
+                <Dot tone={STATUS[r.status][0]} size={6} />{STATUS[r.status][1]}
+              </span>
             </div>
             <div style={{ fontSize: 12, color: 'var(--faint)', lineHeight: 1.45, marginTop: 3, textWrap: 'pretty' }}>{r.d}</div>
           </div>
@@ -40,20 +44,66 @@ function WatchCard() {
   )
 }
 
-function ShieldCard({ s, save }: { s: Settings; save: (p: Partial<Settings>) => void }) {
-  const sh = s.shield
-  const set = (p: Partial<Settings['shield']>) => save({ shield: { ...sh, ...p } })
+function BlockingCard({ s, save }: { s: Settings; save: (p: Partial<Settings>) => void }) {
   const listed = s.sites.filter((x) => x.class === 'rest').length
   return (
     <Card pad={20}>
-      <Section right={<SoonPill />}>Site blocking</Section>
+      <Section>Site blocking</Section>
       <div className="nn-mono" style={{ fontSize: 11.5, color: 'var(--faint)', padding: '8px 10px', borderRadius: 'var(--r-sm)', background: 'var(--surface-faint)', border: '1px solid var(--line-faint)' }}>
         {listed} domains on the block list
       </div>
-      <PrefRow title="Block during timers" desc="Rest sites won't load during a focus session."><Toggle on={sh.enabled} onChange={(v) => set({ enabled: v })} /></PrefRow>
-      <PrefRow title="Include subdomains" desc="Also blocks m.youtube.com, old.reddit.com and so on."><Toggle on={sh.subdomains} onChange={(v) => set({ subdomains: v })} /></PrefRow>
-      <PrefRow title="Encrypted-DNS guard" desc="Stops browsers from getting around the block with encrypted DNS." last><Toggle on={sh.dohGuard} onChange={(v) => set({ dohGuard: v })} /></PrefRow>
+      <PrefRow title="Block during timers" desc="Rest sites and their subdomains won't load in Chrome during a focus session." last>
+        <Toggle on={s.blockSites} onChange={(v) => save({ blockSites: v })} />
+      </PrefRow>
     </Card>
+  )
+}
+
+const CODE = { fontSize: 11.5, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line-faint)', borderRadius: 'var(--r-sm)', padding: '1px 5px', userSelect: 'text', wordBreak: 'break-all' } as const
+
+function ExtensionNotice() {
+  const extension = useFocus((st) => st.tick.extension)
+  const [dir, setDir] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  if (extension) return null
+  const install = async () => {
+    setBusy(true)
+    try {
+      setDir(await api.installBrowserExtension())
+    } catch (e) {
+      say(`Couldn't set up the extension: ${e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const copy = () => navigator.clipboard.writeText(dir ?? '').then(() => say('Folder path copied'), (e) => say(`Couldn't copy: ${e}`))
+  return (
+    <div style={{ padding: '10px 12px', marginBottom: 10, borderRadius: 'var(--r-md)', background: 'var(--warning-surface)', border: '1px solid var(--warning-border)', fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>
+      {dir ? (
+        <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <li>In Chrome, open <code className="nn-mono" style={CODE}>chrome://extensions</code> and turn on Developer mode.</li>
+          <li>
+            Click Load unpacked and choose <code className="nn-mono" style={CODE}>{dir}</code>{' '}
+            <Btn variant="line" size="sm" onClick={() => void copy()} style={{ marginLeft: 4 }}>Copy</Btn>
+          </li>
+          <li>This notice goes away once the extension connects.</li>
+        </ol>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1, textWrap: 'pretty' }}>To track and block websites, add the Nube Nube extension to Chrome.</div>
+          <Btn variant="soft" size="sm" onClick={() => void install()} disabled={busy}>{busy ? 'Setting up…' : 'Set up'}</Btn>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const INPUT = { fontSize: 12.5, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', padding: '8px 11px', outline: 'none', userSelect: 'text' } as const
+
+function RemoveBtn({ name, onClick }: { name: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} aria-label={`Remove ${name}`} title="Remove" className="nn-ui"
+      style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', color: 'var(--faint)', cursor: 'pointer', borderRadius: 'var(--r-sm)', fontSize: 16, lineHeight: 1 }}>×</button>
   )
 }
 
@@ -74,16 +124,14 @@ function SitesList({ s, save }: { s: Settings; save: (p: Partial<Settings>) => v
     save({ sites: [{ domain: d, class: 'rest' }, ...s.sites] })
     setQ('')
   }
-  const hint: Record<AppClass, string> = { rest: 'blocked during focus sessions', neutral: 'not counted', work: 'counts as work' }
+  const hint: Record<AppClass, string> = { rest: s.blockSites ? 'blocked during focus sessions' : 'costs rest', neutral: 'neutral', work: 'counts as work' }
   const sorted = [...s.sites].sort((a, b) => ORDER[a.class] - ORDER[b.class] || a.domain.localeCompare(b.domain))
   return (
     <>
-      <div style={{ fontSize: 12, color: 'var(--faint)', lineHeight: 1.45, marginBottom: 10 }}>
-        Website tracking and blocking are coming soon. Your list is saved for when they land.
-      </div>
+      <ExtensionNotice />
       <form onSubmit={submit} style={{ display: 'flex', gap: 8, marginBottom: err ? 6 : 10 }}>
         <input value={q} onChange={(e) => { setQ(e.target.value); setErr(null) }} placeholder="Add a domain, like tiktok.com" aria-invalid={!!err} className="nn-mono"
-          style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--ink)', background: 'var(--surface-faint)', border: `1px solid ${err ? 'var(--critical)' : 'var(--line)'}`, borderRadius: 'var(--r-md)', padding: '8px 11px', outline: 'none', userSelect: 'text' }} />
+          style={{ ...INPUT, flex: 1, minWidth: 0, border: `1px solid ${err ? 'var(--critical)' : 'var(--line)'}` }} />
         <Btn variant="soft" size="sm" disabled={!q.trim()}>Add</Btn>
       </form>
       {err && <div style={{ fontSize: 12, color: 'var(--critical)', marginBottom: 10 }}>{err}</div>}
@@ -97,39 +145,80 @@ function SitesList({ s, save }: { s: Settings; save: (p: Partial<Settings>) => v
             </div>
           </div>
           <ClassSwitch value={x.class} onChange={(v) => setClass(x.domain, v)} />
-          <button onClick={() => remove(x.domain)} aria-label={`Remove ${x.domain}`} title="Remove" className="nn-ui"
-            style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', color: 'var(--faint)', cursor: 'pointer', borderRadius: 'var(--r-sm)', fontSize: 16, lineHeight: 1 }}>×</button>
+          <RemoveBtn name={x.domain} onClick={() => remove(x.domain)} />
         </div>
       ))}
     </>
   )
 }
 
-function AppsList({ s, save }: { s: Settings; save: (p: Partial<Settings>) => void }) {
-  const [scanning, setScanning] = useState(false)
-  const apps = Object.keys(s.apps).sort((a, b) => a.localeCompare(b))
-  const setClass = (n: string, c: AppClass) => save({ apps: { ...s.apps, [n]: c } })
-  // Adds every app seen in front or running now, as Neutral, without touching existing ones.
-  const scan = async () => {
-    setScanning(true)
+function HelperNotice({ helper, setHelper }: { helper: TrackingHelper; setHelper: (h: TrackingHelper) => void }) {
+  const [busy, setBusy] = useState(false)
+  if (helper === 'ok') return null
+  const install = async () => {
+    setBusy(true)
     try {
-      const [known, running] = await Promise.all([api.getKnownApps(), api.listRunningApps()])
-      const found = [...known.map((k) => k.name), ...running].filter((n) => n.trim() && !(n in s.apps))
-      if (found.length) save({ apps: { ...Object.fromEntries(found.map((n) => [n, 'neutral' as const])), ...s.apps } })
-      say(found.length ? `Found ${found.length} new app${found.length === 1 ? '' : 's'}` : 'No new apps found')
+      setHelper(await api.installTrackingHelper())
     } catch (e) {
-      say(`Scan failed: ${e}`)
+      say(`Install failed: ${e}`)
     } finally {
-      setScanning(false)
+      setBusy(false)
     }
   }
-  const hint: Record<AppClass, string> = { rest: 'costs rest', neutral: 'not counted', work: 'counts as work' }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', marginBottom: 10, borderRadius: 'var(--r-md)', background: 'var(--warning-surface)', border: '1px solid var(--warning-border)' }}>
+      <div style={{ flex: 1, fontSize: 12, color: 'var(--text)', lineHeight: 1.45, textWrap: 'pretty' }}>
+        {helper === 'missing'
+          ? 'To track apps on GNOME, NubeNube needs a small extension. Install it, then log out and back in.'
+          : 'Installed. Log out and back in to start tracking apps.'}
+      </div>
+      {helper === 'missing' && <Btn variant="soft" size="sm" onClick={() => void install()} disabled={busy}>{busy ? 'Installing…' : 'Install'}</Btn>}
+    </div>
+  )
+}
+
+function AppsList({ s, save }: { s: Settings; save: (p: Partial<Settings>) => void }) {
+  const [q, setQ] = useState('')
+  const [options, setOptions] = useState<string[]>([])
+  useEffect(() => {
+    api.listApps().then(setOptions).catch((e) => say(`Couldn't load your apps: ${e}`))
+  }, [])
+  const apps = Object.keys(s.apps).sort((a, b) => a.localeCompare(b))
+  const listed = new Set(apps.map((n) => n.toLowerCase()))
+  const needle = q.trim().toLowerCase()
+  const matches = needle ? options.filter((n) => n.toLowerCase().includes(needle) && !listed.has(n.toLowerCase())).slice(0, 6) : []
+  const setClass = (n: string, c: AppClass) => save({ apps: { ...s.apps, [n]: c } })
+  const add = (n: string) => {
+    save({ apps: { [n]: 'rest', ...s.apps } })
+    setQ('')
+  }
+  const remove = (n: string) => save({ apps: Object.fromEntries(Object.entries(s.apps).filter(([k]) => k !== n)) })
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (matches[0]) add(matches[0])
+  }
+  const hint: Record<AppClass, string> = { rest: 'costs rest', neutral: 'neutral', work: 'counts as work' }
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <span style={{ flex: 1, fontSize: 12, color: 'var(--faint)' }}>{apps.length ? '' : 'Scan to list the apps you use.'}</span>
-        <Btn variant="line" size="sm" onClick={() => void scan()} disabled={scanning}>{scanning ? 'Scanning…' : 'Scan apps'}</Btn>
-      </div>
+      <form onSubmit={submit} style={{ marginBottom: 10 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setQ('') }} placeholder="Search your apps, like Spotify"
+          style={{ ...INPUT, width: '100%', boxSizing: 'border-box' }} />
+        {needle && (
+          <div style={{ marginTop: 6, border: '1px solid var(--line-faint)', borderRadius: 'var(--r-md)', overflow: 'hidden' }}>
+            {matches.length
+              ? matches.map((n, i) => (
+                <button key={n} type="button" onClick={() => add(n)} className="nn-ui"
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '7px 10px', border: 'none', borderTop: i ? '1px solid var(--line-faint)' : 'none', background: i ? 'transparent' : 'var(--surface-faint)', color: 'var(--ink)', fontSize: 12.5, fontWeight: 600, textAlign: 'left', cursor: 'pointer' }}>
+                  <Avatar name={n} size={22} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n}</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--faint)' }}>Add</span>
+                </button>
+              ))
+              : <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--faint)' }}>No app matches “{q.trim()}”.</div>}
+          </div>
+        )}
+      </form>
+      {!apps.length && <div style={{ fontSize: 12, color: 'var(--faint)', lineHeight: 1.45 }}>Add the apps you want to count as rest or work. Apps not on this list are neutral.</div>}
       {apps.map((n, i) => (
         <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 2px', borderBottom: i === apps.length - 1 ? 'none' : '1px solid var(--line-faint)' }}>
           <Avatar name={n} size={28} />
@@ -138,6 +227,7 @@ function AppsList({ s, save }: { s: Settings; save: (p: Partial<Settings>) => vo
             <div style={{ fontSize: 11.5, color: s.apps[n] === 'rest' ? 'var(--critical)' : 'var(--faint)', marginTop: 2 }}>{hint[s.apps[n]]}</div>
           </div>
           <ClassSwitch value={s.apps[n]} onChange={(v) => setClass(n, v)} />
+          <RemoveBtn name={n} onClick={() => remove(n)} />
         </div>
       ))}
     </>
@@ -148,6 +238,11 @@ export function Sources() {
   const s = useSettings((st) => st.settings)
   const saveAsync = useSettings((st) => st.save)
   const [tab, setTab] = useState<'sites' | 'apps'>('apps')
+  const [helper, setHelper] = useState<TrackingHelper>('ok')
+  const extension = useFocus((st) => st.tick.extension)
+  useEffect(() => {
+    api.trackingHelper().then(setHelper).catch((e) => say(`Couldn't check app tracking: ${e}`))
+  }, [])
   if (!s) return null
   const save = (p: Partial<Settings>) => void saveAsync(p)
   const classes: AppClass[] = tab === 'sites' ? s.sites.map((x) => x.class) : Object.values(s.apps)
@@ -161,11 +256,11 @@ export function Sources() {
           <Pill tone="danger" style={{ fontSize: 11 }}>{`${count('rest')} rest`}</Pill>
           <Pill tone="mint" style={{ fontSize: 11 }}>{`${count('work')} work`}</Pill>
         </div>
-        {tab === 'sites' ? <SitesList s={s} save={save} /> : <AppsList s={s} save={save} />}
+        {tab === 'sites' ? <SitesList s={s} save={save} /> : <><HelperNotice helper={helper} setHelper={setHelper} /><AppsList s={s} save={save} /></>}
       </Card>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <ShieldCard s={s} save={save} />
-        <WatchCard />
+        <BlockingCard s={s} save={save} />
+        <WatchCard helper={helper} extension={extension} blockSites={s.blockSites} />
       </div>
     </div>
   )
