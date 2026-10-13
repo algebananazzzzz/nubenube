@@ -31,11 +31,10 @@
   --line-faint:  #656a761a;          /* border-faint */
   --line-strong: #3b3d4566;          /* border-strong */
 
-  /* status — success / warning / critical (-on = darker hover for critical btn) */
+  /* status — success / warning / critical */
   --success:        #008a22; --success-surface: #f2fbf6; --success-border: #cceeda;
   --warning:        #bb5a00; --warning-surface: #fff9e8; --warning-border: #fbeabf;
-  --critical:       #e52228; --critical-on: #c00005; --critical-surface: #fff5f5; --critical-border: #fbd4d4;
-  --work:           #4f46e5; --work-surface: #eef2ff; --work-border: #c7d2fe;
+  --critical:       #e52228; --critical-surface: #fff5f5; --critical-border: #fbd4d4;
 
   --teal: #0d9488;   /* planned rest */
   --excellent: oklch(0.6 0.17 300); /* "Excellent" pace: ahead of today's target */
@@ -54,8 +53,8 @@
   --accent-border:  #c7d2fe;
 
   /* creature flat palette — JS injects vivid set per hue */
-  --clay-soft: #ededfd; --clay-light: #c5c5f5; --clay-mid: #9191e8;
-  --clay-deep: #6262cc; --clay-ink: #3e3e96; --clay-cheek: #c4a8e6;
+  --clay-light: #c5c5f5; --clay-mid: #9191e8;
+  --clay-deep: #6262cc; --clay-cheek: #c4a8e6;
 }
 
 /* ── DARK · the default theme (flat) ────────────────────────────── */
@@ -78,8 +77,7 @@
 
   --success:        #4ec77a; --success-surface: rgba(0,138,34,.15);  --success-border: rgba(78,199,122,.34);
   --warning:        #e0922e; --warning-surface: rgba(187,90,0,.18);  --warning-border: rgba(224,146,46,.34);
-  --critical:       #f4716f; --critical-on: #f78b89; --critical-surface: rgba(229,34,40,.16); --critical-border: rgba(244,113,111,.34);
-  --work:           #818cf8; --work-surface: rgba(79,70,229,.16); --work-border: rgba(129,140,248,.36);
+  --critical:       #f4716f; --critical-surface: rgba(229,34,40,.16); --critical-border: rgba(244,113,111,.34);
 
   --teal: #2dd4bf;
   --excellent: oklch(0.72 0.15 300);

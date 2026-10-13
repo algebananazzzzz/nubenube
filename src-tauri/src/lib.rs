@@ -20,7 +20,6 @@ use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
-use tauri_plugin_autostart::MacosLauncher;
 
 use commands::AppState;
 use engine::Engine;
@@ -42,11 +41,9 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             commands::show_main(app);
         }))
-        .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_clipboard_manager::init())
         // Close hides the main window; the app lives on in the tray.
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

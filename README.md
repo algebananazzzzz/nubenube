@@ -75,7 +75,7 @@ The numbers behind the economy: the work:rest ratio, how often the focus multipl
 
 Classify each app as **Work**, **Neutral** or **Rest**. Only Rest changes the economy: Work and Neutral both count as focus inside a timer, and the class is what the Insights breakdowns group by. **Scan apps** adds every app NubeNube has seen in front plus whatever is running now.
 
-Websites work the same way through the Nube Nube extension for Chrome and other Chromium browsers: **Set up** on the Websites tab writes it to disk, then load it from `chrome://extensions` with Developer mode on and **Load unpacked**. The site in your focused tab takes the place of the browser's own class, and while a timer runs, Rest sites (and their subdomains) are blocked. A blocked tab returns to its page when the timer ends.
+Websites work the same way through the Nube Nube extension for Chrome and other Chromium browsers: **Add to Chrome** on the Websites tab writes it to disk and copies its folder path; then turn on Developer mode under Manage Extensions, click **Load unpacked**, and paste the path. The site in your focused tab takes the place of the browser's own class, and while a timer runs, Rest sites (and their subdomains) are blocked. A blocked tab returns to its page when the timer ends.
 
 ### Desktop companion
 

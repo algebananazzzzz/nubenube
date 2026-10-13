@@ -27,23 +27,15 @@ export function Card({ children, style, pad = 20, soft, onClick, hoverable }: {
   )
 }
 
-type Tone = 'neutral' | 'soft' | 'accent' | 'ghost' | 'mint' | 'amber' | 'danger' | 'work'
+type Tone = 'neutral' | 'mint' | 'danger'
 
-// `tone` overrides `kind`; both index the same palette map.
-export function Pill({ children, kind = 'neutral', tone, style }: {
-  children: ReactNode; kind?: Tone; tone?: Tone; style?: CSSProperties
-}) {
+export function Pill({ children, tone = 'neutral', style }: { children: ReactNode; tone?: Tone; style?: CSSProperties }) {
   const tones: Record<Tone, { bg: string; fg: string; bd: string }> = {
     neutral: { bg: 'var(--surface-strong)', fg: 'var(--text)', bd: 'var(--line)' },
-    soft: { bg: 'var(--accent-surface)', fg: 'var(--accent-text)', bd: 'var(--accent-border)' },
-    accent: { bg: 'var(--accent-surface)', fg: 'var(--accent-text)', bd: 'var(--accent-border)' },
-    ghost: { bg: 'transparent', fg: 'var(--faint)', bd: 'var(--line)' },
     mint: { bg: 'var(--success-surface)', fg: 'var(--success)', bd: 'var(--success-border)' },
-    amber: { bg: 'var(--warning-surface)', fg: 'var(--warning)', bd: 'var(--warning-border)' },
     danger: { bg: 'var(--critical-surface)', fg: 'var(--critical)', bd: 'var(--critical-border)' },
-    work: { bg: 'var(--work-surface)', fg: 'var(--work)', bd: 'var(--work-border)' },
   }
-  const t = tones[tone || kind] || tones.neutral
+  const t = tones[tone]
   return (
     <span className="nn-ui" style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -54,7 +46,7 @@ export function Pill({ children, kind = 'neutral', tone, style }: {
   )
 }
 
-type Variant = 'primary' | 'line' | 'soft' | 'ghost' | 'critical'
+type Variant = 'primary' | 'line' | 'soft'
 
 export function Btn({ children, variant = 'primary', size = 'md', onClick, style, disabled, full }: {
   children: ReactNode; variant?: Variant; size?: 'sm' | 'md' | 'lg'
@@ -67,10 +59,8 @@ export function Btn({ children, variant = 'primary', size = 'md', onClick, style
     primary: { bg: 'var(--accent)', bgH: 'var(--accent-hover)', fg: 'var(--accent-on)', bd: 'transparent' },
     line: { bg: 'var(--surface)', bgH: 'var(--surface-hover)', fg: 'var(--ink)', bd: 'var(--line-strong)' },
     soft: { bg: 'var(--accent-surface)', bgH: 'var(--accent-surface)', fg: 'var(--accent-text)', bd: 'var(--accent-border)' },
-    ghost: { bg: 'transparent', bgH: 'var(--surface-hover)', fg: 'var(--text)', bd: 'transparent' },
-    critical: { bg: 'var(--critical)', bgH: 'var(--critical-on)', fg: '#fff', bd: 'transparent' },
   }
-  const v = V[variant] || V.primary
+  const v = V[variant]
   return (
     <button onClick={onClick} disabled={disabled}
       onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
@@ -247,10 +237,10 @@ export function Bar({ pct, color = 'var(--accent)', height = 6, track = 'var(--s
   )
 }
 
-export function ShieldIcon({ size = 13, color = 'currentColor', filled }: { size?: number; color?: string; filled?: boolean }) {
+export function ShieldIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" style={{ flexShrink: 0 }}>
-      <path d="M8 1.5l5.5 2v4.2c0 3.2-2.3 5.8-5.5 6.8-3.2-1-5.5-3.6-5.5-6.8V3.5z" fill={filled ? color : 'none'} stroke={color} strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M8 1.5l5.5 2v4.2c0 3.2-2.3 5.8-5.5 6.8-3.2-1-5.5-3.6-5.5-6.8V3.5z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
   )
 }

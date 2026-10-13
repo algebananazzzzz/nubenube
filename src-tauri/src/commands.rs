@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::db;
@@ -104,11 +105,15 @@ pub async fn install_tracking_helper(app: AppHandle) -> Result<TrackingHelper, S
     crate::gnome::install(&app.path().data_dir().map_err(|e| e.to_string())?)
 }
 
-/// Writes the extension's files and returns their folder for Chrome's "Load unpacked".
+/// Writes the extension's files and puts their folder on the clipboard for
+/// Chrome's "Load unpacked" picker. Copied here, not in the webview: WebKit
+/// refuses clipboard writes once the click's user activation has passed.
 #[tauri::command]
 pub async fn install_browser_extension(app: AppHandle) -> Result<String, String> {
     let dir = crate::browser::install(&app.path().app_data_dir().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    Ok(dir.to_string_lossy().into_owned())
+    let dir = dir.to_string_lossy().into_owned();
+    app.clipboard().write_text(dir.clone()).map_err(|e| e.to_string())?;
+    Ok(dir)
 }
 
 // ── desktop companion window ──────────────────────────────────────────────

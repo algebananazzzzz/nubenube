@@ -91,6 +91,8 @@ pub fn listen(shared: Shared, dev: bool) {
     });
 }
 
+// tungstenite's handshake callback trait fixes this signature.
+#[allow(clippy::result_large_err)]
 fn check_origin(req: &Request, res: Response) -> Result<Response, ErrorResponse> {
     if req.headers().get("origin").is_some_and(|o| o == EXTENSION_ORIGIN) {
         return Ok(res);

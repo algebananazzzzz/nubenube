@@ -4,11 +4,9 @@
 import type { Theme } from '../store/prefs'
 
 export type Clay = {
-  soft: string
   light: string
   mid: string
   deep: string
-  ink: string
   cheek: string
 }
 
@@ -21,11 +19,9 @@ export function hueClay(h: number, satMul = 1, ltAdd = 0): Clay {
   const s = (v: number) => clamp(v * satMul)
   const l = (v: number) => clamp(v + ltAdd)
   return {
-    soft: `hsl(${h} ${s(64)}% ${l(95)}%)`,
     light: `hsl(${h} ${s(72)}% ${l(86)}%)`,
     mid: `hsl(${h} ${s(66)}% ${l(73)}%)`,
     deep: `hsl(${h} ${s(54)}% ${l(58)}%)`,
-    ink: `hsl(${h} ${s(46)}% ${l(Math.max(34, 40))}%)`,
     cheek: `hsl(${(h + 22) % 360} ${s(58)}% ${l(78)}%)`,
   }
 }
@@ -68,11 +64,9 @@ export function accentVars(hue: number, dark: boolean): Record<string, string> {
 // the clay fill adapts to hue.
 export function themeVars(theme: Theme, clay: Clay): Record<string, string> {
   return {
-    '--clay-soft': clay.soft,
     '--clay-light': clay.light,
     '--clay-mid': clay.mid,
     '--clay-deep': clay.deep,
-    '--clay-ink': clay.ink,
     '--clay-cheek': clay.cheek,
     ...accentVars(DEFAULT_HUE, theme === 'dark'),
   }

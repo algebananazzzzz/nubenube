@@ -61,6 +61,10 @@ function BlockingCard({ s, save }: { s: Settings; save: (p: Partial<Settings>) =
 
 const CODE = { fontSize: 11.5, color: 'var(--ink)', background: 'var(--surface-faint)', border: '1px solid var(--line-faint)', borderRadius: 'var(--r-sm)', padding: '1px 5px', userSelect: 'text', wordBreak: 'break-all' } as const
 
+// Chrome won't open chrome:// pages from the command line, so the user gets
+// there by menu; the picker's go-to-path shortcut saves hunting for the folder.
+const GOTO_PATH = navigator.userAgent.includes('Mac') ? '⌘⇧G' : 'Ctrl+L'
+
 function ExtensionNotice() {
   const extension = useFocus((st) => st.tick.extension)
   const [dir, setDir] = useState<string | null>(null)
@@ -70,28 +74,29 @@ function ExtensionNotice() {
     setBusy(true)
     try {
       setDir(await api.installBrowserExtension())
+      say('Folder path copied')
     } catch (e) {
       say(`Couldn't set up the extension: ${e}`)
     } finally {
       setBusy(false)
     }
   }
-  const copy = () => navigator.clipboard.writeText(dir ?? '').then(() => say('Folder path copied'), (e) => say(`Couldn't copy: ${e}`))
   return (
     <div style={{ padding: '10px 12px', marginBottom: 10, borderRadius: 'var(--r-md)', background: 'var(--warning-surface)', border: '1px solid var(--warning-border)', fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>
       {dir ? (
         <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <li>In Chrome, open <code className="nn-mono" style={CODE}>chrome://extensions</code> and turn on Developer mode.</li>
+          <li>In Chrome, open the ⋮ menu → Extensions → Manage Extensions, and turn on Developer mode (top right).</li>
           <li>
-            Click Load unpacked and choose <code className="nn-mono" style={CODE}>{dir}</code>{' '}
-            <Btn variant="line" size="sm" onClick={() => void copy()} style={{ marginLeft: 4 }}>Copy</Btn>
+            Click Load unpacked, press <b>{GOTO_PATH}</b>, paste, press Enter, then click Select. The folder path is on your clipboard:{' '}
+            <code className="nn-mono" style={CODE}>{dir}</code>{' '}
+            <Btn variant="line" size="sm" onClick={() => void install()} disabled={busy} style={{ marginLeft: 4 }}>Copy again</Btn>
           </li>
           <li>This notice goes away once the extension connects.</li>
         </ol>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ flex: 1, textWrap: 'pretty' }}>To track and block websites, add the Nube Nube extension to Chrome.</div>
-          <Btn variant="soft" size="sm" onClick={() => void install()} disabled={busy}>{busy ? 'Setting up…' : 'Set up'}</Btn>
+          <Btn variant="soft" size="sm" onClick={() => void install()} disabled={busy}>{busy ? 'Setting up…' : 'Add to Chrome'}</Btn>
         </div>
       )}
     </div>
