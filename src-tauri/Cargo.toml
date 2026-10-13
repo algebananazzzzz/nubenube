@@ -1,6 +1,6 @@
 [package]
 name = "nubenube"
-version = "1.1.0"
+version = "1.1.1"
 description = "Nube Nube, a gentle desktop focus companion: focus timers earn rest, distractions spend it"
 authors = ["Nube Nube"]
 license = ""
