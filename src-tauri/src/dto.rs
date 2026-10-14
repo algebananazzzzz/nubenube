@@ -20,6 +20,9 @@ pub struct FocusTick {
     pub len: f64,
     pub run: f64,
     pub pending: f64,
+    pub paused: bool,
+    /// Pause budget left for the running timer.
+    pub pause_left: f64,
     /// 0 = Monday.
     pub weekday: usize,
     pub week: Vec<Day>,

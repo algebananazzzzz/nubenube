@@ -10,7 +10,7 @@ type FocusStore = {
 }
 
 const EMPTY: FocusTick = {
-  state: 'idle', app: '', appClass: 'neutral', away: false, left: 0, len: 0, run: 0, pending: 0,
+  state: 'idle', app: '', appClass: 'neutral', away: false, left: 0, len: 0, run: 0, pending: 0, paused: false, pauseLeft: 0,
   weekday: (new Date().getDay() + 6) % 7,
   week: Array.from({ length: 7 }, () => ({ focus: 0, distract: 0, earned: 0, spent: 0, target: null, hit: false, bonus: 0, restPlan: 0 })),
   bank: 0,

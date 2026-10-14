@@ -121,6 +121,8 @@ pub fn run() {
             commands::get_focus,
             commands::start_timer,
             commands::stop_timer,
+            commands::pause_timer,
+            commands::resume_timer,
             commands::set_target,
             commands::set_day_target,
             commands::set_day_rest,

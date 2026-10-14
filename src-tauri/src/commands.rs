@@ -56,6 +56,16 @@ pub fn stop_timer(app: AppHandle, state: State<AppState>) -> Result<f64, String>
 }
 
 #[tauri::command]
+pub fn pause_timer(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    mutate(&app, &state, |e| e.pause_timer())
+}
+
+#[tauri::command]
+pub fn resume_timer(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    mutate(&app, &state, |e| e.resume_timer())
+}
+
+#[tauri::command]
 pub fn set_target(app: AppHandle, state: State<AppState>, secs: f64) -> Result<(), String> {
     mutate(&app, &state, |e| e.set_target(secs))
 }

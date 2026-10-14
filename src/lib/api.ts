@@ -18,6 +18,8 @@ export const api = {
   getFocus: () => call<FocusTick>('get_focus', {}, mockEngine.get),
   startTimer: (minutes: number) => call<void>('start_timer', { minutes }, () => mockEngine.startTimer(minutes)),
   stopTimer: () => call<number>('stop_timer', {}, mockEngine.stopTimer),
+  pauseTimer: () => call<void>('pause_timer', {}, mockEngine.pauseTimer),
+  resumeTimer: () => call<void>('resume_timer', {}, mockEngine.resumeTimer),
   setTarget: (secs: number) => call<void>('set_target', { secs }, () => mockEngine.setTarget(secs)),
   setDayTarget: (day: number, secs: number | null) =>
     call<void>('set_day_target', { day, secs }, () => mockEngine.setDayTarget(day, secs)),

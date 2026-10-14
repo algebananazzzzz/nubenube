@@ -143,6 +143,8 @@ impl Engine {
             len: t.map_or(0.0, |t| t.len),
             run: t.map_or(0.0, |t| t.run),
             pending: t.map_or(0.0, |t| t.pending),
+            paused: t.is_some_and(|t| t.paused),
+            pause_left: t.map_or(0.0, |t| t.pause_left),
             weekday: weekday(Local::now().date_naive()),
             week: self.week.clone(),
             bank: economy::bank(&self.week),
@@ -216,6 +218,10 @@ impl Engine {
                     continue;
                 }
                 Event::TargetHit { bonus } => FocusEvent::TargetHit { bonus },
+                Event::Resumed => {
+                    notify::timer_resumed(app);
+                    continue;
+                }
             };
             app.emit("focus-event", ev).map_err(|e| log::warn!("emit focus-event: {e}")).ok();
         }
@@ -247,6 +253,16 @@ impl Engine {
         self.state = economy::state(false, Foreground::Focus);
         self.save_timer().map_err(|e| e.to_string())?;
         Ok(forfeited)
+    }
+
+    pub fn pause_timer(&mut self) -> Result<(), String> {
+        self.timer.as_mut().ok_or("No timer is running")?.pause()?;
+        self.save_timer().map_err(|e| e.to_string())
+    }
+
+    pub fn resume_timer(&mut self) -> Result<(), String> {
+        self.timer.as_mut().ok_or("No timer is running")?.resume()?;
+        self.save_timer().map_err(|e| e.to_string())
     }
 
     /// Today's target can only go up, so it can't be lowered to dodge the bonus rule.

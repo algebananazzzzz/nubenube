@@ -22,6 +22,8 @@ export type FocusTick = {
   len: number
   run: number // seconds of unbroken focus in the running timer
   pending: number // finish bonus accrued so far
+  paused: boolean
+  pauseLeft: number // pause budget left for the running timer
   weekday: number // 0 = Monday
   week: Day[]
   bank: number // may go negative
