@@ -1,10 +1,10 @@
 // Rules: the numbers behind the economy (work:rest ratio, finish multiplier,
-// quick-start lengths, daily target bonus).
+// quick-start lengths, daily target bonus, rest days).
 
 import { useEffect, useState } from 'react'
 import { hueSwatch } from '../lib/clay'
 import { FINISH, WARMTH } from '../lib/economy'
-import { fmtHM } from '../lib/format'
+import { DAYS, fmtHM } from '../lib/format'
 import { usePrefs } from '../store/prefs'
 import { useSettings } from '../store/settings'
 import { Card, PrefRow, SegTabs, Section, Slider } from '../components/ui'
@@ -55,6 +55,10 @@ export function Rules() {
     presets[i] = v
     void save({ presets })
   }
+  const toggleRestDay = (i: number) => {
+    const restDays = s.restDays.includes(i) ? s.restDays.filter((d) => d !== i) : [...s.restDays, i].sort((a, b) => a - b)
+    void save({ restDays })
+  }
   const col = { display: 'flex', flexDirection: 'column', gap: 14 } as const
 
   return (
@@ -90,9 +94,24 @@ export function Rules() {
       </div>
       <div style={col}>
         <Card pad={20}>
-          <Section sub="Hit your daily target to earn extra rest for the weekend.">Daily target bonus</Section>
+          <Section sub="Hit your daily target to earn extra rest for your rest days.">Daily target bonus</Section>
           <Slider title="Bonus" value={s.targetBonusMin} min={0} max={90} step={5} onChange={(v) => void save({ targetBonusMin: v })} accent="var(--success)"
             fmt={(v) => (v ? `+${fmtHM(v * 60)} rest` : 'none')} last />
+        </Card>
+        <Card pad={20}>
+          <Section sub="Distribute rest across the rest days. Distribute work across the work days.">Rest days</Section>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0,1fr))', gap: 6 }}>
+            {DAYS.map((d, i) => {
+              const on = s.restDays.includes(i)
+              return (
+                <button key={d} onClick={() => toggleRestDay(i)} aria-pressed={on} className="nn-ui" style={{
+                  padding: '5px 0', borderRadius: 'var(--r-md)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                  background: on ? 'var(--teal)' : 'var(--surface-faint)', color: on ? 'var(--teal-on)' : 'var(--text)',
+                  border: `1px solid ${on ? 'transparent' : 'var(--line)'}`,
+                }}>{d}</button>
+              )
+            })}
+          </div>
         </Card>
       </div>
     </div>

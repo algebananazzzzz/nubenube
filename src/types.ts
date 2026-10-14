@@ -44,6 +44,7 @@ export type Settings = {
   targetBonusMin: number
   presets: number[]
   finishEvery: number
+  restDays: number[] // 0 = Monday
 }
 
 export type RangeKey = 'today' | 'week' | 'month'

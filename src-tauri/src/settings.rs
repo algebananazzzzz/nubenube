@@ -30,6 +30,8 @@ pub struct Settings {
     pub presets: Vec<u32>,
     /// Minutes of unbroken focus per finish-bonus step.
     pub finish_every: f64,
+    /// Weekdays (0 = Monday) that the week planner fills with spare rest instead of work.
+    pub rest_days: Vec<u8>,
     /// Pre-redesign app lists; folded into `apps` on load and never written back.
     #[serde(skip_serializing)]
     distraction_apps: Vec<String>,
@@ -56,6 +58,7 @@ impl Default for Settings {
             target_bonus_min: 30.0,
             presets: vec![25, 45, 60, 90],
             finish_every: 15.0,
+            rest_days: vec![5, 6],
             distraction_apps: Vec::new(),
             work_apps: Vec::new(),
         }
@@ -193,6 +196,7 @@ mod tests {
         assert_eq!(s.class_of("Code"), "work");
         assert_eq!(s.class_of("Chrome"), "rest");
         assert_eq!(s.ratio, 5.0);
+        assert_eq!(s.rest_days, [5, 6]);
         assert!(!serde_json::to_string(&s).unwrap().contains("distractionApps"));
     }
 }

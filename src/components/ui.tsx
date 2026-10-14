@@ -46,7 +46,7 @@ export function Pill({ children, tone = 'neutral', style }: { children: ReactNod
   )
 }
 
-type Variant = 'primary' | 'line' | 'soft'
+type Variant = 'primary' | 'line' | 'soft' | 'rest'
 
 export function Btn({ children, variant = 'primary', size = 'md', onClick, style, disabled, full }: {
   children: ReactNode; variant?: Variant; size?: 'sm' | 'md' | 'lg'
@@ -59,6 +59,7 @@ export function Btn({ children, variant = 'primary', size = 'md', onClick, style
     primary: { bg: 'var(--accent)', bgH: 'var(--accent-hover)', fg: 'var(--accent-on)', bd: 'transparent' },
     line: { bg: 'var(--surface)', bgH: 'var(--surface-hover)', fg: 'var(--ink)', bd: 'var(--line-strong)' },
     soft: { bg: 'var(--accent-surface)', bgH: 'var(--accent-surface)', fg: 'var(--accent-text)', bd: 'var(--accent-border)' },
+    rest: { bg: 'var(--teal)', bgH: 'var(--teal-hover)', fg: 'var(--teal-on)', bd: 'transparent' },
   }
   const v = V[variant]
   return (
