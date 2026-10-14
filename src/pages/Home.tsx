@@ -167,7 +167,8 @@ function WeekPlanner() {
   // A raised target for today waiting on the "can't lower it" confirmation.
   const [pending, setPending] = useState<number | null>(null)
   const today = f.weekday
-  const laterWeekdays = [0, 1, 2, 3, 4].filter((i) => i > today)
+  const laterWorkDays = [0, 1, 2, 3, 4, 5, 6].filter((i) => i > today && !s.restDays.includes(i))
+  const restDaysLeft = s.restDays.filter((i) => i >= today)
   const focusOf = (i: number) => (draft && draft.i === i && draft.kind === 'focus' ? draft.v
     : i === today && pending != null ? pending
     : i < today ? f.week[i].focus : f.week[i].target || 0)
@@ -175,8 +176,12 @@ function WeekPlanner() {
   const fmax = Math.max(PL_FMAX, Math.ceil(Math.max(...f.week.map((d, i) => Math.max(focusOf(i), i <= today ? d.focus : 0, i < today ? d.target || 0 : 0))) / 7200) * 7200)
   const rmax = Math.max(PL_RMAX, Math.ceil(Math.max(...f.week.map((_, i) => restOf(i))) / 3600) * 3600)
   const axis = (v: number) => `${+(v / 3600).toFixed(1)}h`
-  const earnOf = (i: number) => (i < today ? f.week[i].earned : focusOf(i) / s.ratio + (focusOf(i) ? s.targetBonusMin * 60 : 0))
-  const cum = f.week.map((_, i) => earnOf(i) - restOf(i)).reduce<number[]>((acc, v) => (acc.push((acc.length ? acc[acc.length - 1] : 0) + v), acc), [])
+  // Rest already earned counts in full, bonuses included. Planned work counts at
+  // the base ratio only, since its bonuses aren't won yet. Today takes whichever
+  // is larger.
+  const earnOf = (i: number) => (i < today ? f.week[i].earned : i === today ? Math.max(focusOf(i) / s.ratio, f.week[i].earned) : focusOf(i) / s.ratio)
+  const useOf = (i: number) => (i === today ? Math.max(restOf(i), f.week[i].spent) : restOf(i))
+  const cum = f.week.map((_, i) => earnOf(i) - useOf(i)).reduce<number[]>((acc, v) => (acc.push((acc.length ? acc[acc.length - 1] : 0) + v), acc), [])
   const plannedFocus = f.week.reduce((a, d, i) => a + (i < today ? d.focus : Math.max(focusOf(i), i === today ? d.focus : 0)), 0)
   const workDone = f.week.reduce((a, d) => a + d.focus, 0)
   const end = cum[6], plannedRest = f.week.reduce((a, _, i) => a + restOf(i), 0)
@@ -206,14 +211,20 @@ function WeekPlanner() {
     }
     el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up)
   }
-  // Spread the missing work over the weekdays after today; today's commitment is
+  // Spread the missing work over the work days after today; today's commitment is
   // only ever raised by the user, with confirmation.
   const balance = () => {
     const need = -end * s.ratio
-    if (!laterWeekdays.length || need <= 0) return
-    const per = Math.ceil(need / laterWeekdays.length / PL_STEP) * PL_STEP
-    laterWeekdays.forEach((i) => void setDayTarget(i, Math.min(12 * 3600, (f.week[i].target || 0) + per)))
-    say(`Added ${fmtHM(per)} of work to ${laterWeekdays.map((i) => DAYS[i]).join(', ')}`)
+    if (!laterWorkDays.length || need <= 0) return
+    const per = Math.ceil(need / laterWorkDays.length / PL_STEP) * PL_STEP
+    laterWorkDays.forEach((i) => void setDayTarget(i, Math.min(12 * 3600, (f.week[i].target || 0) + per)))
+    say(`Added ${fmtHM(per)} of work to ${laterWorkDays.map((i) => DAYS[i]).join(', ')}`)
+  }
+  // Rounded down so spreading the surplus never tips the week into debt.
+  const spareEach = restDaysLeft.length ? Math.floor(end / restDaysLeft.length / PL_STEP) * PL_STEP : 0
+  const spend = () => {
+    restDaysLeft.forEach((i) => void setDayRest(i, Math.min(12 * 3600, f.week[i].restPlan + spareEach)))
+    say(`Added ${fmtHM(spareEach)} of rest to ${restDaysLeft.map((i) => DAYS[i]).join(', ')}`)
   }
 
   const maxAbs = Math.max(1800, ...cum.map(Math.abs)), SH = 46
@@ -224,7 +235,7 @@ function WeekPlanner() {
 
   return (
     <Card pad={20}>
-      <Section sub="Commit to focusing more on weekdays to enjoy your weekends!">This week's commitments</Section>
+      <Section sub="Commit to focusing more on work days to enjoy your rest days!">This week's commitments</Section>
       <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap', padding: '12px 14px', borderRadius: 'var(--r-md)', background: end >= 0 ? 'var(--success-surface)' : 'var(--critical-surface)', border: `1px solid ${end >= 0 ? 'var(--success-border)' : 'var(--critical-border)'}`, marginBottom: 16 }}>
         <div><div className="nn-num" style={{ fontSize: 18, color: PL_FOCUS }}>{fmtHM(workDone)}</div><div style={{ fontSize: 11.5, color: 'var(--faint)' }}>work done</div></div>
         <div><div className="nn-num" style={{ fontSize: 18, color: PL_FOCUS }}>{fmtHM(plannedFocus)}</div><div style={{ fontSize: 11.5, color: 'var(--faint)' }}>work planned</div></div>
@@ -234,7 +245,8 @@ function WeekPlanner() {
           <div className="nn-disp" style={{ fontSize: 14.5, color: end >= 0 ? 'var(--success)' : 'var(--critical)' }}>{end >= 0 ? `${fmtHM(end)} to spare` : `${fmtHM(-end)} of rest not earned yet`}</div>
           <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 2 }}>{end >= 0 ? 'Your work covers the rest you planned' : `Add about ${fmtHM(-end * s.ratio)} of work to cover it`}</div>
         </div>
-        {end < 0 && laterWeekdays.length > 0 && <Btn variant="primary" size="sm" onClick={balance}>Balance it</Btn>}
+        {end < 0 && laterWorkDays.length > 0 && <Btn variant="primary" size="sm" onClick={balance}>Distribute work</Btn>}
+        {spareEach > 0 && <Btn variant="rest" size="sm" onClick={spend}>Distribute rest</Btn>}
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
@@ -264,7 +276,7 @@ function WeekPlanner() {
                     {tgtH != null && <div style={{ position: 'absolute', left: 0, right: 0, bottom: tgtH, borderTop: '1.5px dashed var(--ink)', opacity: 0.45 }} />}
                   </div>
                   <div style={{ height: 30, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderTop: '1px solid var(--line-strong)', borderBottom: '1px solid var(--line-strong)' }}>
-                    <span style={{ fontSize: 11.5, fontWeight: 700, color: isToday ? 'var(--ink)' : past ? 'var(--faint)' : 'var(--text)' }}>{isToday ? 'Today' : DAYS[i]}</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: isToday ? 'var(--ink)' : s.restDays.includes(i) ? PL_REST : past ? 'var(--faint)' : 'var(--text)' }}>{isToday ? 'Today' : DAYS[i]}</span>
                   </div>
                   <div onPointerDown={(e) => startDrag(i, 'rest', e)} style={{ position: 'relative', height: PL_BOT, cursor: editable ? 'ns-resize' : 'default', touchAction: 'none', backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${PL_BOT / 4 - 1}px, var(--line-faint) ${PL_BOT / 4 - 1}px, var(--line-faint) ${PL_BOT / 4}px)` }}>
                     {rh > 0 && (

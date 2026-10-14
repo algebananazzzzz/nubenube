@@ -37,6 +37,7 @@
   --critical:       #e52228; --critical-surface: #fff5f5; --critical-border: #fbd4d4;
 
   --teal: #0d9488;   /* planned rest */
+  --teal-hover: #0f766e; --teal-on: #ffffff;
   --excellent: oklch(0.6 0.17 300); /* "Excellent" pace: ahead of today's target */
 
   /* elevation — Helios is nearly flat; overlays get a small lift */
@@ -80,6 +81,7 @@
   --critical:       #f4716f; --critical-surface: rgba(229,34,40,.16); --critical-border: rgba(244,113,111,.34);
 
   --teal: #2dd4bf;
+  --teal-hover: #5eead4; --teal-on: #0c0d10;
   --excellent: oklch(0.72 0.15 300);
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,.3);

@@ -19,6 +19,7 @@ export const mockSettings: Settings = {
   ],
   blockSites: true,
   ratio: 5, targetBonusMin: 30, presets: [25, 45, 60, 90], finishEvery: 15,
+  restDays: [5, 6],
 }
 
 export const mockApps = ['Calculator', 'Cursor', 'Discord', 'Files', 'Firefox', 'Ghostty', 'Google Chrome', 'Mail', 'Obsidian', 'Slack', 'Spotify', 'Steam', 'Telegram', 'Visual Studio Code']
