@@ -37,7 +37,7 @@ export function useFocusView() {
   const { satMul, ltAdd } = lifeTint(Math.max(0, Math.min(300, 40 + hp * 120)), 100, 300)
   // The sky shows what is happening right now; a low bank already shows in the
   // creature's mood and clay, so it must not wash out the state tint.
-  const sky: Sky = tick.away ? 'idle'
+  const sky: Sky = tick.away || tick.paused ? 'idle'
     : tick.state === 'timer' ? (tick.appClass === 'work' ? 'good' : 'focus')
     : tick.state === 'drift' ? (hp < 0.15 ? 'danger' : 'worried')
     : 'idle'
@@ -62,6 +62,7 @@ export type FocusView = ReturnType<typeof useFocusView>
 
 // One-line status for the sidebar chip and the companion.
 export function statusLine(f: FocusView): { tone: string; text: string; pulse: boolean } {
+  if (f.paused) return { tone: 'var(--faint)', text: `Paused · ${fmtCountdown(f.pauseLeft)}`, pulse: false }
   if (f.away) return { tone: 'var(--faint)', text: f.inTimer ? `Away · ${fmtCountdown(f.left)}` : 'Away', pulse: false }
   if (f.state === 'timer') return { tone: f.appClass === 'work' ? 'var(--success)' : hueSwatch(f.phase.hue, f.dark), text: `Focusing · ${fmtCountdown(f.left)}`, pulse: true }
   if (f.state === 'drift') return { tone: f.hp < 0.15 ? 'var(--critical)' : 'var(--warning)', text: `Resting · ${f.app}`, pulse: true }

@@ -1,6 +1,8 @@
 //! The focus economy. Time inside a running timer earns rest at 1/ratio per
 //! second; a Rest app or site spends it 1:1 and ends any running timer; the weekly bank is
-//! Σ(earned − spent) since Monday and may go negative. Pure, so the rules are
+//! Σ(earned − spent) since Monday and may go negative. A timer may pause for
+//! up to PAUSE_SECS in total, during which it neither counts down nor earns,
+//! though Rest still ends it. Pure, so the rules are
 //! tested apart from the OS watcher and the database.
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +11,13 @@ use serde::{Deserialize, Serialize};
 /// every `finish_every` minutes; the accrued extra is paid when the timer
 /// finishes, and stopping early or resting mid-timer forfeits it.
 pub const FINISH: [f64; 4] = [1.0, 1.15, 1.3, 1.5];
+
+/// Pause budget per timer, shared across all of its pauses.
+pub const PAUSE_SECS: f64 = 300.0;
+
+fn full_pause() -> f64 {
+    PAUSE_SECS
+}
 
 pub fn finish_tier(run_secs: f64, every_min: f64) -> usize {
     let step = (every_min * 60.0).max(1.0);
@@ -54,12 +63,36 @@ pub struct Timer {
     pub pending: f64,
     /// Base rest earned during this timer, for the "session done" summary.
     pub earned: f64,
+    #[serde(default)]
+    pub paused: bool,
+    /// Pause budget left. A pause drains it in wall-clock time, Away included.
+    #[serde(default = "full_pause")]
+    pub pause_left: f64,
 }
 
 impl Timer {
     pub fn new(minutes: f64) -> Self {
         let len = minutes * 60.0;
-        Timer { len, left: len, run: 0.0, pending: 0.0, earned: 0.0 }
+        Timer { len, left: len, run: 0.0, pending: 0.0, earned: 0.0, paused: false, pause_left: PAUSE_SECS }
+    }
+
+    pub fn pause(&mut self) -> Result<(), &'static str> {
+        if self.paused {
+            return Err("The timer is already paused");
+        }
+        if self.pause_left <= 0.0 {
+            return Err("No pause time left for this timer");
+        }
+        self.paused = true;
+        Ok(())
+    }
+
+    pub fn resume(&mut self) -> Result<(), &'static str> {
+        if !self.paused {
+            return Err("The timer isn't paused");
+        }
+        self.paused = false;
+        Ok(())
     }
 }
 
@@ -77,6 +110,8 @@ pub enum Event {
     /// A Rest app or site came to the front mid-timer, which ends the timer.
     Broken { forfeited: f64 },
     TargetHit { bonus: f64 },
+    /// The pause budget ran out, so the timer is running again.
+    Resumed,
 }
 
 pub fn state(timer: bool, fg: Foreground) -> &'static str {
@@ -112,6 +147,14 @@ pub fn step(timer: &mut Option<Timer>, day: &mut Day, rules: &Rules, fg: Foregro
     let Some(t) = timer.as_mut() else {
         return events;
     };
+    if t.paused {
+        t.pause_left = (t.pause_left - dt).max(0.0);
+        if t.pause_left <= 0.0 {
+            t.paused = false;
+            events.push(Event::Resumed);
+        }
+        return events;
+    }
 
     t.left -= dt;
     if fg == Foreground::Focus {
@@ -243,6 +286,64 @@ mod tests {
         apply_target(&mut d, Some(600.0), 1800.0);
         assert!(!d.hit);
         assert!(close(d.earned, 100.0));
+    }
+
+    #[test]
+    fn a_paused_timer_freezes_and_earns_nothing() {
+        let mut t = Some(Timer::new(60.0));
+        let mut d = Day::default();
+        run(&mut t, &mut d, Foreground::Focus, 100);
+        t.as_mut().unwrap().pause().unwrap();
+        let before = (d.clone(), t.clone().unwrap());
+        run(&mut t, &mut d, Foreground::Focus, 60);
+        let p = t.as_ref().unwrap();
+        assert_eq!(d, before.0);
+        assert!(close(p.left, before.1.left) && close(p.run, before.1.run) && close(p.pending, before.1.pending));
+        assert!(close(p.pause_left, PAUSE_SECS - 60.0));
+    }
+
+    #[test]
+    fn the_pause_budget_is_shared_across_pauses_and_auto_resumes() {
+        let mut t = Some(Timer::new(60.0));
+        let mut d = Day::default();
+        t.as_mut().unwrap().pause().unwrap();
+        run(&mut t, &mut d, Foreground::Away, 200);
+        t.as_mut().unwrap().resume().unwrap();
+        run(&mut t, &mut d, Foreground::Focus, 10);
+        t.as_mut().unwrap().pause().unwrap();
+        let ev = run(&mut t, &mut d, Foreground::Focus, 100);
+        assert_eq!(ev, vec![Event::Resumed]);
+        let p = t.as_ref().unwrap();
+        assert!(!p.paused);
+        assert!(close(p.pause_left, 0.0));
+        assert!(t.as_mut().unwrap().pause().is_err());
+        run(&mut t, &mut d, Foreground::Focus, 10);
+        assert!(close(t.unwrap().left, 3600.0 - 20.0));
+    }
+
+    #[test]
+    fn rest_still_ends_a_paused_timer() {
+        let mut t = Some(Timer::new(60.0));
+        let mut d = Day::default();
+        t.as_mut().unwrap().pause().unwrap();
+        let ev = run(&mut t, &mut d, Foreground::Rest, 1);
+        assert!(t.is_none());
+        assert!(matches!(ev[..], [Event::Broken { .. }]));
+    }
+
+    #[test]
+    fn pause_and_resume_reject_the_wrong_state() {
+        let mut t = Timer::new(10.0);
+        assert!(t.resume().is_err());
+        t.pause().unwrap();
+        assert!(t.pause().is_err());
+    }
+
+    #[test]
+    fn a_timer_saved_before_pausing_existed_loads_with_a_full_budget() {
+        let t: Timer = serde_json::from_str(r#"{"len":600,"left":300,"run":300,"pending":0,"earned":60}"#).unwrap();
+        assert!(!t.paused);
+        assert!(close(t.pause_left, PAUSE_SECS));
     }
 
     #[test]

@@ -24,6 +24,8 @@ export const mockSettings: Settings = {
 
 export const mockApps = ['Calculator', 'Cursor', 'Discord', 'Files', 'Firefox', 'Ghostty', 'Google Chrome', 'Mail', 'Obsidian', 'Slack', 'Spotify', 'Steam', 'Telegram', 'Visual Studio Code']
 
+const PAUSE_SECS = 300 // economy.rs PAUSE_SECS
+
 const todayIdx = () => (new Date().getDay() + 6) % 7
 
 // focus hours, rest minutes, target hours for Mon..Sun
@@ -41,7 +43,7 @@ function mockWeek(): Day[] {
 
 let tick: FocusTick = (() => {
   const week = mockWeek()
-  return { state: 'timer', app: 'Cursor', appClass: 'work', away: false, left: 1100, len: 2700, run: 1600, pending: 12, weekday: todayIdx(), week, bank: bankOf(week), extension: false }
+  return { state: 'timer', app: 'Cursor', appClass: 'work', away: false, left: 1100, len: 2700, run: 1600, pending: 12, paused: false, pauseLeft: PAUSE_SECS, weekday: todayIdx(), week, bank: bankOf(week), extension: false }
 })()
 
 function bankOf(week: Day[]) {
@@ -63,6 +65,11 @@ function editToday(fn: (d: Day) => Day): Day[] {
 
 function advance() {
   if (tick.state !== 'timer') return
+  if (tick.paused) {
+    const pauseLeft = Math.max(0, tick.pauseLeft - 1)
+    publish({ ...tick, pauseLeft, paused: pauseLeft > 0 })
+    return
+  }
   const s = mockSettings, run = tick.run + 1
   let week = editToday((d) => ({ ...d, focus: d.focus + 1, earned: d.earned + 1 / s.ratio }))
   const today = week[tick.weekday]
@@ -75,7 +82,7 @@ function advance() {
   if (tick.left <= 1) {
     week = week.map((d, i) => (i === tick.weekday ? { ...d, earned: d.earned + pending } : d))
     eventListeners.forEach((cb) => cb({ kind: 'timerFinished', earned: tick.len / s.ratio + pending, bonus: pending }))
-    publish({ ...tick, state: 'idle', left: 0, len: 0, run: 0, pending: 0, week })
+    publish({ ...tick, state: 'idle', left: 0, len: 0, run: 0, pending: 0, paused: false, pauseLeft: 0, week })
     return
   }
   publish({ ...tick, left: tick.left - 1, run, pending, week })
@@ -93,12 +100,18 @@ export const mockEngine = {
     return () => { eventListeners.delete(cb) }
   },
   startTimer(minutes: number) {
-    publish({ ...tick, state: 'timer', left: minutes * 60, len: minutes * 60, run: 0, pending: 0 })
+    publish({ ...tick, state: 'timer', left: minutes * 60, len: minutes * 60, run: 0, pending: 0, paused: false, pauseLeft: PAUSE_SECS })
   },
   stopTimer(): number {
     const forfeited = tick.pending
-    publish({ ...tick, state: 'idle', left: 0, len: 0, run: 0, pending: 0 })
+    publish({ ...tick, state: 'idle', left: 0, len: 0, run: 0, pending: 0, paused: false, pauseLeft: 0 })
     return forfeited
+  },
+  pauseTimer() {
+    if (tick.state === 'timer' && tick.pauseLeft > 0) publish({ ...tick, paused: true })
+  },
+  resumeTimer() {
+    publish({ ...tick, paused: false })
   },
   setTarget(secs: number) {
     const bonus = mockSettings.targetBonusMin * 60

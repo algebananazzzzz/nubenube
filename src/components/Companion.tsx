@@ -7,7 +7,7 @@ import { useFocus } from '../store/focus'
 import { usePrefs } from '../store/prefs'
 import { useSettings } from '../store/settings'
 import { armChimeUnlock, playChime } from '../lib/chime'
-import { events } from '../lib/api'
+import { api, events } from '../lib/api'
 import { rescue } from '../lib/rescue'
 import { hueSwatch, themeVars } from '../lib/clay'
 import { statusLine, useFocusView, type FocusView } from '../lib/derive'
@@ -54,6 +54,10 @@ function headline(f: FocusView): { value: string; label: string; note?: string; 
   }
 }
 
+// The companion has no toast, so a failed pause is only logged, as rescue.ts does.
+const togglePause = (paused: boolean) =>
+  (paused ? api.resumeTimer() : api.pauseTimer()).catch((e) => console.warn('[nube] pause failed', e))
+
 function CompanionCard({ f, onMinimize, innerRef }: { f: FocusView; onMinimize: () => void; innerRef: Ref<HTMLDivElement> }) {
   const st = statusLine(f)
   const h = headline(f)
@@ -73,7 +77,7 @@ function CompanionCard({ f, onMinimize, innerRef }: { f: FocusView; onMinimize: 
       <div style={{ padding: '12px 13px 13px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <Dot tone={st.tone} pulse={st.pulse} size={8} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.inTimer && !f.away ? (f.app ? `Focusing · ${f.app}` : 'Focusing') : st.text}</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.inTimer && !f.away && !f.paused ? (f.app ? `Focusing · ${f.app}` : 'Focusing') : st.text}</span>
         </div>
         <div title={h.title} style={{ display: 'flex', alignItems: h.note ? 'center' : 'baseline', gap: 6, marginTop: 10 }}>
           <span className="nn-num" style={{ fontSize: 26, fontWeight: 700, color: h.tone, lineHeight: 1, whiteSpace: 'nowrap' }}>{h.value}</span>
@@ -89,6 +93,13 @@ function CompanionCard({ f, onMinimize, innerRef }: { f: FocusView; onMinimize: 
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 9 }}>
           <Btn variant="soft" size="sm" full onClick={() => void rescue.openMain()}>Open Nube</Btn>
+          {f.inTimer && (f.paused || f.pauseLeft > 0) && (
+            <button onClick={() => void togglePause(f.paused)} title={f.paused ? 'Resume' : `Pause (${fmtCountdown(f.pauseLeft)} left)`} style={{ flexShrink: 0, width: 32, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--text)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                {f.paused ? <path d="M3 1.5v9l7.5-4.5z" /> : <><rect x="2" y="1.5" width="3" height="9" rx="1" /><rect x="7" y="1.5" width="3" height="9" rx="1" /></>}
+              </svg>
+            </button>
+          )}
           <button onClick={onMinimize} title="Minimize" style={{ flexShrink: 0, width: 32, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--text)', cursor: 'pointer', fontSize: 15, fontWeight: 700 }}>–</button>
         </div>
       </div>

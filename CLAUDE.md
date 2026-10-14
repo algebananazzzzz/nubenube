@@ -105,6 +105,7 @@ Do NOT rely on `npm run lint`; the lint config is pre-broken and not a signal.
   Sites search, named as the watcher reports them.
 
 Commands (see `commands.rs`): `get_focus`, `start_timer`, `stop_timer`,
+`pause_timer` / `resume_timer` (5 min pause budget per timer, auto-resumes),
 `set_target` (raise-only), `set_day_target`, `set_day_rest`, `get_insights`,
 `get_settings`, `save_settings`, `list_apps`,
 `tracking_helper`, `install_tracking_helper`, `install_browser_extension`, the
