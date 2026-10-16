@@ -26,7 +26,7 @@ const setDayRest = (day: number, secs: number) => api.setDayRest(day, secs).catc
 const presetLabel = (m: number) => (m >= 60 && m % 60 === 0 ? `${m / 60}h` : `${m}m`)
 
 function heroCopy(f: FocusView): { title: string; line: string; tone: string; pulse: boolean } {
-  if (f.paused) return { title: 'Paused', line: `Resumes in ${fmtCountdown(f.pauseLeft)}. Rest apps and sites still end the timer.`, tone: 'var(--faint)', pulse: false }
+  if (f.paused) return { title: 'Paused', line: `Resume within ${fmtCountdown(f.pauseLeft)} or the timer ends.`, tone: 'var(--faint)', pulse: false }
   if (f.away) return { title: 'Away', line: "Tracking pauses while you're away, so nothing is earned or spent.", tone: 'var(--faint)', pulse: false }
   switch (f.state) {
     case 'timer': return { title: `Focusing · ${f.app || 'NubeNube'}`, line: f.extension ? 'Rest sites are blocked, and opening a Rest app ends the timer.' : 'Opening a Rest app or site ends the timer.', tone: f.appClass === 'work' ? 'var(--success)' : hueSwatch(f.phase.hue, f.dark), pulse: true }
@@ -120,7 +120,7 @@ function Hero() {
           <span style={{ flex: 1 }} />
           {f.paused
             ? <Btn variant="primary" size="sm" onClick={() => void resumeTimer()}>Resume</Btn>
-            : f.inTimer && f.pauseLeft > 0 && <Btn variant="line" size="sm" onClick={() => void pauseTimer()}>{`Pause · ${fmtCountdown(f.pauseLeft)}`}</Btn>}
+            : f.inTimer && <Btn variant="line" size="sm" onClick={() => void pauseTimer()}>{`Pause · ${fmtCountdown(f.pauseLeft)}`}</Btn>}
           {f.inTimer && <Btn variant="line" size="sm" onClick={() => void stopTimer()}>Stop early</Btn>}
           {f.state === 'drift' && <QuickPicks />}
         </div>

@@ -66,8 +66,8 @@ function editToday(fn: (d: Day) => Day): Day[] {
 function advance() {
   if (tick.state !== 'timer') return
   if (tick.paused) {
-    const pauseLeft = Math.max(0, tick.pauseLeft - 1)
-    publish({ ...tick, pauseLeft, paused: pauseLeft > 0 })
+    const pauseLeft = tick.pauseLeft - 1
+    publish(pauseLeft > 0 ? { ...tick, pauseLeft } : { ...tick, state: 'idle', left: 0, len: 0, run: 0, pending: 0, paused: false, pauseLeft: 0 })
     return
   }
   const s = mockSettings, run = tick.run + 1
@@ -108,7 +108,7 @@ export const mockEngine = {
     return forfeited
   },
   pauseTimer() {
-    if (tick.state === 'timer' && tick.pauseLeft > 0) publish({ ...tick, paused: true })
+    if (tick.state === 'timer') publish({ ...tick, paused: true })
   },
   resumeTimer() {
     publish({ ...tick, paused: false })

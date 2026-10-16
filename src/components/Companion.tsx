@@ -93,7 +93,7 @@ function CompanionCard({ f, onMinimize, innerRef }: { f: FocusView; onMinimize: 
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 9 }}>
           <Btn variant="soft" size="sm" full onClick={() => void rescue.openMain()}>Open Nube</Btn>
-          {f.inTimer && (f.paused || f.pauseLeft > 0) && (
+          {f.inTimer && (
             <button onClick={() => void togglePause(f.paused)} title={f.paused ? 'Resume' : `Pause (${fmtCountdown(f.pauseLeft)} left)`} style={{ flexShrink: 0, width: 32, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--text)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
               <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
                 {f.paused ? <path d="M3 1.5v9l7.5-4.5z" /> : <><rect x="2" y="1.5" width="3" height="9" rx="1" /><rect x="7" y="1.5" width="3" height="9" rx="1" /></>}
