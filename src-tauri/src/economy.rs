@@ -1,8 +1,8 @@
 //! The focus economy. Time inside a running timer earns rest at 1/ratio per
 //! second; a Rest app or site spends it 1:1 and ends any running timer; the weekly bank is
 //! Σ(earned − spent) since Monday and may go negative. A timer may pause for
-//! up to PAUSE_SECS in total, during which it neither counts down nor earns,
-//! though Rest still ends it. Pure, so the rules are
+//! up to PAUSE_SECS in total, during which it neither counts down nor earns;
+//! Rest ends it, and so does running out of pause. Pure, so the rules are
 //! tested apart from the OS watcher and the database.
 
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,8 @@ pub struct Timer {
     pub earned: f64,
     #[serde(default)]
     pub paused: bool,
-    /// Pause budget left. A pause drains it in wall-clock time, Away included.
+    /// Pause budget left. A pause drains it in wall-clock time, Away included,
+    /// and the timer fails when it reaches zero.
     #[serde(default = "full_pause")]
     pub pause_left: f64,
 }
@@ -79,9 +80,6 @@ impl Timer {
     pub fn pause(&mut self) -> Result<(), &'static str> {
         if self.paused {
             return Err("The timer is already paused");
-        }
-        if self.pause_left <= 0.0 {
-            return Err("No pause time left for this timer");
         }
         self.paused = true;
         Ok(())
@@ -110,8 +108,8 @@ pub enum Event {
     /// A Rest app or site came to the front mid-timer, which ends the timer.
     Broken { forfeited: f64 },
     TargetHit { bonus: f64 },
-    /// The pause budget ran out, so the timer is running again.
-    Resumed,
+    /// The pause budget ran out before a resume, which ends the timer.
+    PauseExpired { forfeited: f64 },
 }
 
 pub fn state(timer: bool, fg: Foreground) -> &'static str {
@@ -150,8 +148,8 @@ pub fn step(timer: &mut Option<Timer>, day: &mut Day, rules: &Rules, fg: Foregro
     if t.paused {
         t.pause_left = (t.pause_left - dt).max(0.0);
         if t.pause_left <= 0.0 {
-            t.paused = false;
-            events.push(Event::Resumed);
+            events.push(Event::PauseExpired { forfeited: t.pending });
+            *timer = None;
         }
         return events;
     }
@@ -303,22 +301,22 @@ mod tests {
     }
 
     #[test]
-    fn the_pause_budget_is_shared_across_pauses_and_auto_resumes() {
+    fn running_out_of_pause_ends_the_timer_and_forfeits_the_bonus() {
         let mut t = Some(Timer::new(60.0));
         let mut d = Day::default();
+        run(&mut t, &mut d, Foreground::Focus, 1000);
+        let pending = t.as_ref().unwrap().pending;
+        assert!(pending > 0.0);
         t.as_mut().unwrap().pause().unwrap();
         run(&mut t, &mut d, Foreground::Away, 200);
         t.as_mut().unwrap().resume().unwrap();
-        run(&mut t, &mut d, Foreground::Focus, 10);
         t.as_mut().unwrap().pause().unwrap();
-        let ev = run(&mut t, &mut d, Foreground::Focus, 100);
-        assert_eq!(ev, vec![Event::Resumed]);
-        let p = t.as_ref().unwrap();
-        assert!(!p.paused);
-        assert!(close(p.pause_left, 0.0));
-        assert!(t.as_mut().unwrap().pause().is_err());
-        run(&mut t, &mut d, Foreground::Focus, 10);
-        assert!(close(t.unwrap().left, 3600.0 - 20.0));
+        assert!(run(&mut t, &mut d, Foreground::Focus, 99).is_empty());
+        assert!(t.is_some());
+        let ev = run(&mut t, &mut d, Foreground::Focus, 1);
+        assert!(t.is_none());
+        assert!(matches!(ev[..], [Event::PauseExpired { forfeited }] if close(forfeited, pending)));
+        assert!(close(d.earned, 1000.0 / 5.0));
     }
 
     #[test]

@@ -218,8 +218,8 @@ impl Engine {
                     continue;
                 }
                 Event::TargetHit { bonus } => FocusEvent::TargetHit { bonus },
-                Event::Resumed => {
-                    notify::timer_resumed(app);
+                Event::PauseExpired { .. } => {
+                    notify::pause_expired(app);
                     continue;
                 }
             };
