@@ -15,6 +15,10 @@ export function projectBonus(run: number, left: number, every: number, ratio: nu
   return b
 }
 
+// Timer lengths the UI offers, in minutes (quick starts and the Home stepper).
+export const LEN_MIN = 5, LEN_MAX = 180, LEN_STEP = 5
+export const clampLen = (v: number) => Math.max(LEN_MIN, Math.min(LEN_MAX, Math.round(v)))
+
 // Creature hue per finish step; also tints the multiplier pips.
 export const WARMTH = [{ hue: 243 }, { hue: 190 }, { hue: 150 }, { hue: 40 }]
 

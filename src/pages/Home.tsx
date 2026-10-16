@@ -5,7 +5,7 @@ import { useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { api } from '../lib/api'
 import { hueSwatch } from '../lib/clay'
 import { useFocusView, useRules, type FocusView } from '../lib/derive'
-import { FINISH, WARMTH, projectBonus } from '../lib/economy'
+import { FINISH, LEN_MAX, LEN_MIN, LEN_STEP, WARMTH, clampLen, projectBonus } from '../lib/economy'
 import { DAYS, fmtCountdown, fmtHM } from '../lib/format'
 import { say } from '../store/toast'
 import { Sky, Nube } from '../components/NubeCreature'
@@ -37,13 +37,24 @@ function heroCopy(f: FocusView): { title: string; line: string; tone: string; pu
   }
 }
 
-function QuickPicks() {
+// With `selected`, picks set the length to start; without, a pick starts the timer at once.
+function QuickPicks({ onPick, selected }: { onPick: (m: number) => void; selected?: number }) {
   const s = useRules()
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
       {s.presets.map((m, i) => (
-        <Btn key={i} variant={i === 1 ? 'primary' : 'line'} size="sm" onClick={() => void startTimer(m)} style={{ minWidth: 58 }}>{presetLabel(m)}</Btn>
+        <Btn key={i} variant={(selected === undefined ? i === 1 : m === selected) ? 'primary' : 'line'} size="sm" onClick={() => onPick(m)} style={{ minWidth: 58 }}>{presetLabel(m)}</Btn>
       ))}
+    </div>
+  )
+}
+
+function LenStepper({ len, onChange }: { len: number; onChange: (m: number) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <Btn variant="line" size="sm" disabled={len <= LEN_MIN} onClick={() => onChange(clampLen(len - LEN_STEP))} style={{ width: 34, height: 34, padding: 0, fontSize: 18, flexShrink: 0 }}>−</Btn>
+      <div className="nn-num" style={{ fontSize: 'clamp(40px, 7vw, 56px)', fontWeight: 700, color: 'var(--ink)', lineHeight: 1, letterSpacing: '-.03em' }}>{fmtCountdown(len * 60)}</div>
+      <Btn variant="line" size="sm" disabled={len >= LEN_MAX} onClick={() => onChange(clampLen(len + LEN_STEP))} style={{ width: 34, height: 34, padding: 0, fontSize: 18, flexShrink: 0 }}>+</Btn>
     </div>
   )
 }
@@ -72,7 +83,10 @@ function Hero() {
   const prog = f.inTimer ? 1 - f.left / Math.max(1, f.len) : 0
   const eyebrow = f.inTimer ? `Timer · ${Math.round(f.len / 60)} min` : f.state === 'drift' ? 'Spending rest' : 'Start focusing'
   const earning = f.inTimer ? `Finish to earn +${fmtHM(f.len / s.ratio)} rest, +${fmtHM(f.projected)} bonus` : null
-  const preset = s.presets[1] ?? s.presets[0] ?? 45
+  // Stays null until the user adjusts, so the default follows presets once settings load.
+  const [picked, setPicked] = useState<number | null>(null)
+  const len = picked ?? s.presets[1] ?? s.presets[0] ?? 45
+  const idle = !f.inTimer && f.state !== 'drift'
   return (
     <Card pad={0} style={{ overflow: 'hidden', display: 'flex', flexWrap: 'wrap', minHeight: 320 }}>
       <div style={{ position: 'relative', flex: '1 1 240px', minHeight: 240, maxWidth: 380, borderRight: '1px solid var(--line-faint)' }}>
@@ -106,10 +120,11 @@ function Hero() {
         {f.inTimer || f.state === 'drift'
           ? <div className="nn-num" style={{ fontSize: 56, fontWeight: 700, color: bigTone, lineHeight: 1, letterSpacing: '-.03em' }}>{big}</div>
           : (
-            <div style={{ padding: '6px 0 2px' }}>
-              <QuickPicks />
+            <div>
+              <LenStepper len={len} onChange={setPicked} />
+              <div style={{ marginTop: 14 }}><QuickPicks onPick={setPicked} selected={len} /></div>
               <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 10, lineHeight: 1.5 }}>
-                {`Finish a ${preset}m session to earn ${fmtHM((preset * 60) / s.ratio)} of rest, plus a ${fmtHM(projectBonus(0, preset * 60, s.finishEvery, s.ratio))} bonus.`}
+                {`Finish to earn ${fmtHM((len * 60) / s.ratio)} of rest, plus a ${fmtHM(projectBonus(0, len * 60, s.finishEvery, s.ratio))} bonus.`}
               </div>
             </div>
           )}
@@ -122,7 +137,8 @@ function Hero() {
             ? <Btn variant="primary" size="sm" onClick={() => void resumeTimer()}>Resume</Btn>
             : f.inTimer && <Btn variant="line" size="sm" onClick={() => void pauseTimer()}>{`Pause · ${fmtCountdown(f.pauseLeft)}`}</Btn>}
           {f.inTimer && <Btn variant="line" size="sm" onClick={() => void stopTimer()}>Stop early</Btn>}
-          {f.state === 'drift' && <QuickPicks />}
+          {f.state === 'drift' && <QuickPicks onPick={(m) => void startTimer(m)} />}
+          {idle && <Btn variant="primary" size="sm" onClick={() => void startTimer(len)}>{`Start ${presetLabel(len)}`}</Btn>}
         </div>
       </div>
     </Card>
