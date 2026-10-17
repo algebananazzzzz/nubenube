@@ -27,8 +27,8 @@ function Grip() {
 }
 
 // The headline number and its bar: a timer counts down to completion, resting
-// drains the bank against all the rest earned this week (so it starts full and
-// empties as it's spent), and idle fills toward today's target.
+// drains today's planned rest (going negative once it's overspent), and idle
+// fills toward today's target.
 function headline(f: FocusView): { value: string; label: string; note?: string; title?: string; tone: string; pct: number; bar: string } {
   if (f.inTimer) {
     return {
@@ -38,12 +38,13 @@ function headline(f: FocusView): { value: string; label: string; note?: string; 
     }
   }
   if (f.state === 'drift') {
-    const earned = f.week.reduce((a, d) => a + d.earned, 0)
-    const tone = statusLine(f).tone
+    const plan = f.today.restPlan
+    const left = plan - f.today.spent
+    const tone = left < 0 ? 'var(--critical)' : statusLine(f).tone
     return {
-      value: fmtHM(f.bank), label: `of ${fmtHM(earned)}`, note: 'rest left',
-      title: `${fmtHM(f.bank)} left of the ${fmtHM(earned)} rest earned this week`,
-      tone, pct: earned > 0 ? f.bank / earned : 0, bar: tone,
+      value: fmtHM(left), label: `of ${fmtHM(plan)}`, note: 'rest today',
+      title: `${fmtHM(left)} left of the ${fmtHM(plan)} rest planned for today`,
+      tone, pct: plan > 0 ? left / plan : 0, bar: tone,
     }
   }
   return {
