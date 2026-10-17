@@ -16,7 +16,6 @@ import { Sky, Nube, skyBorder, skyTint } from './NubeCreature'
 import { Bar, Btn, Dot } from './ui'
 
 const CARD_W = 208 // logical px — the card's fixed width; height flows from content
-const PAD = 12 // transparent breathing room around the card for its soft shadow
 
 function Grip() {
   return (
@@ -168,7 +167,8 @@ export function Companion() {
 
   useEffect(() => { document.documentElement.setAttribute('data-theme', f.theme) }, [f.theme])
 
-  // Drive the real OS window size from the measured card/pill (+ shadow padding).
+  // Drive the real OS window size from the measured card/pill. The transparent
+  // window still takes clicks, so any margin around the card would block what's under it.
   // Re-bound on `mini` because the observed element itself swaps (card ⇄ pill).
   useEffect(() => {
     const el = cardRef.current
@@ -176,8 +176,8 @@ export function Companion() {
     let last = ''
     let raf = 0
     const measure = () => {
-      const w = Math.ceil(el.offsetWidth) + PAD * 2
-      const h = Math.ceil(el.offsetHeight) + PAD * 2
+      const w = Math.ceil(el.offsetWidth)
+      const h = Math.ceil(el.offsetHeight)
       const key = `${w}x${h}`
       if (w > 1 && h > 1 && key !== last) { last = key; void rescue.resizeCompanion(w, h) }
     }
@@ -188,9 +188,7 @@ export function Companion() {
   }, [mini])
 
   return (
-    // fit-content + padding → the wrapper hugs the card and leaves room for the
-    // soft shadow; the window is then sized to (card + padding) by the effect.
-    <div className="nn-app" data-theme={f.theme} style={{ ...themeVars(f.theme, f.clay), width: 'fit-content', padding: PAD, background: 'transparent' }}>
+    <div className="nn-app" data-theme={f.theme} style={{ ...themeVars(f.theme, f.clay), display: 'flex', alignItems: 'flex-start', width: 'fit-content', background: 'transparent' }}>
       {mini
         ? <CompanionMini f={f} innerRef={cardRef} onExpand={() => setPref('companionMini', false)} />
         : <CompanionCard f={f} innerRef={cardRef} onMinimize={() => setPref('companionMini', true)} />}

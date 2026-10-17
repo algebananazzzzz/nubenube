@@ -15,6 +15,9 @@ use crate::settings::Settings;
 
 pub struct AppState {
     pub engine: Arc<Mutex<Engine>>,
+    /// Top-right corner the companion's pending resize must keep, plus the
+    /// width it was resized to (physical px).
+    pub companion_pin: Mutex<Option<(i32, i32, i32)>>,
 }
 
 impl AppState {
@@ -130,7 +133,7 @@ pub async fn install_browser_extension(app: AppHandle) -> Result<String, String>
 
 /// Initial companion size (logical px) — a first-paint guess; the webview then
 /// calls `nube_resize_companion` to fit its measured content exactly.
-pub const COMPANION_FULL: (f64, f64) = (232.0, 300.0);
+pub const COMPANION_FULL: (f64, f64) = (208.0, 276.0);
 
 /// Nestle the always-on-top companion into the top-right of its monitor.
 pub fn position_companion(w: &WebviewWindow) {
@@ -218,6 +221,7 @@ pub fn nube_resize_companion(app: AppHandle, width: f64, height: f64) {
             (Ok(pos), Ok(size)) => Some((pos.x + size.width as i32, pos.y)),
             _ => None,
         };
+        *w.state::<AppState>().companion_pin.lock().expect("pin mutex poisoned") = anchor.map(|(right, top)| (right, top, new_w));
         let _ = w.set_size(LogicalSize::new(width, height));
         match anchor {
             Some((right, top)) => {
@@ -226,6 +230,21 @@ pub fn nube_resize_companion(app: AppHandle, width: f64, height: f64) {
             None => position_companion(&w), // no rect yet → dock to the corner
         }
         apply_macos_overlay(&w);
+    }
+}
+
+/// GTK moves a window at once but resizes it on its next layout pass, so on a
+/// shrink the WM sees the old width at the new x, pushes it back on-screen, and
+/// the right edge drifts left. Re-applying the pin once the new size lands fixes
+/// it. The move itself also emits Resized with the old size, hence the width check.
+pub fn repin_companion(w: &WebviewWindow, size: PhysicalSize<u32>) {
+    let state = w.state::<AppState>();
+    let mut pin = state.companion_pin.lock().expect("pin mutex poisoned");
+    if let Some((right, top, width)) = *pin {
+        if width == size.width as i32 {
+            *pin = None;
+            let _ = w.set_position(PhysicalPosition::new(right - width, top));
+        }
     }
 }
 

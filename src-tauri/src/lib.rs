@@ -76,7 +76,7 @@ pub fn run() {
             browser::listen(browser.clone(), app.config().identifier.ends_with(".dev"));
             // A fresh file: the pre-redesign nube.db (Claude usage) is left untouched.
             let engine = Arc::new(Mutex::new(Engine::new(dir.join("focus.db"), dir, browser)?));
-            app.manage(AppState { engine: engine.clone() });
+            app.manage(AppState { engine: engine.clone(), companion_pin: Mutex::new(None) });
             engine::start(app.handle().clone(), engine);
 
             // System tray (live presence + quick menu).
@@ -101,7 +101,10 @@ pub fn run() {
             if let Ok(w) = WebviewWindowBuilder::new(app.handle(), "companion", WebviewUrl::App("index.html#/companion".into()))
                 .title("Nube")
                 .inner_size(commands::COMPANION_FULL.0, commands::COMPANION_FULL.1)
-                .resizable(false)
+                // GTK pins a non-resizable window's minimum to its initial size,
+                // so set_size could grow the companion but never shrink it to the
+                // mini pill. Undecorated, so the user still gets no resize handles.
+                .resizable(cfg!(target_os = "linux"))
                 .decorations(false)
                 .transparent(true)
                 .shadow(false) // kill the macOS window shadow (the gray halo box)
@@ -113,6 +116,12 @@ pub fn run() {
             {
                 commands::position_companion(&w);
                 commands::apply_macos_overlay(&w);
+                let pinned = w.clone();
+                w.on_window_event(move |e| {
+                    if let WindowEvent::Resized(size) = e {
+                        commands::repin_companion(&pinned, *size);
+                    }
+                });
             }
 
             Ok(())
