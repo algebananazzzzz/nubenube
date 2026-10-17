@@ -69,7 +69,7 @@ function TimeGraph({ series, range }: { series: (SeriesPoint & { tier: number })
         const fh = up(p) * pps, dh = dn(p) * pps, rx = Math.min(2, bw / 2)
         const pulse = i === nowIdx && range !== 'month' ? { animation: 'nn-bar-pulse 1.8s ease-in-out infinite' } : undefined
         return (
-          <g key={i} style={pulse}>
+          <g key={i} className="nn-loop" style={pulse}>
             {fh > 0 && <rect x={left(i)} y={cy - fh} width={bw} height={fh} rx={rx} fill={focusShade(up(p) / maxUp)} />}
             {dh > 0 && <rect x={left(i)} y={cy} width={bw} height={dh} rx={rx} fill={DIST} />}
           </g>

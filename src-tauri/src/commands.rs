@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -35,12 +35,21 @@ fn mutate<T>(app: &AppHandle, state: &State<AppState>, f: impl FnOnce(&mut Engin
 }
 
 /// Reveal + focus the main window (tray, dock-reopen, single-instance, open cmd).
+/// Closing destroys it to free its webview, so this rebuilds it from the config.
 pub fn show_main(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    let w = match app.get_webview_window("main") {
+        Some(w) => w,
+        None => {
+            let config = app.config().app.windows.iter().find(|c| c.label == "main").expect("main window in tauri.conf.json");
+            match WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
+                Ok(w) => w,
+                Err(e) => return log::error!("reopen main window: {e}"),
+            }
+        }
+    };
+    let _ = w.show();
+    let _ = w.unminimize();
+    let _ = w.set_focus();
 }
 
 #[tauri::command]
@@ -85,7 +94,9 @@ pub fn set_day_rest(app: AppHandle, state: State<AppState>, day: usize, secs: f6
 
 #[tauri::command]
 pub fn get_insights(state: State<AppState>, range: String) -> Result<Insights, String> {
-    db::insights(state.engine().conn(), &range, chrono::Local::now().naive_local()).map_err(|e| e.to_string())
+    let mut e = state.engine();
+    e.flush().map_err(|e| e.to_string())?;
+    db::insights(e.conn(), &range, chrono::Local::now().naive_local()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -102,7 +113,11 @@ pub fn save_settings(state: State<AppState>, settings: Settings) -> Result<Setti
 #[tauri::command]
 pub async fn list_apps(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let mut apps = crate::installed::list();
-    apps.extend(db::known_apps(state.engine().conn()).map_err(|e| e.to_string())?);
+    {
+        let mut e = state.engine();
+        e.flush().map_err(|e| e.to_string())?;
+        apps.extend(db::known_apps(e.conn()).map_err(|e| e.to_string())?);
+    }
     apps.sort_by_cached_key(|n| n.to_lowercase());
     apps.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     Ok(apps)
@@ -160,8 +175,9 @@ pub fn position_companion(w: &WebviewWindow) {
     }
 }
 
+/// Async: building a window inside a sync command deadlocks on Windows.
 #[tauri::command]
-pub fn nube_open_main(app: AppHandle) {
+pub async fn nube_open_main(app: AppHandle) {
     show_main(&app);
 }
 

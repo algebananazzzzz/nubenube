@@ -130,6 +130,13 @@
   * { animation: none !important; }
 }
 
+/* Infinite animations (.nn-loop) hold still in an unfocused window unless the
+   pointer is over it. Under X11, WebKit can't tell a window is covered and
+   keeps rendering them at full frame rate. One-shot enter animations stay
+   unpaused so they never freeze on their first frame. main.tsx sets the
+   attribute. */
+:root[data-unfocused] body:not(:hover) .nn-loop { animation-play-state: paused !important; }
+
 /* bare range — native track + thumb fully hidden; a custom thumb/track is
    drawn over it (used by the Settings sliders) */
 .nn-bare-range { -webkit-appearance: none; appearance: none; background: transparent; }

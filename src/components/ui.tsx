@@ -80,7 +80,7 @@ export function Btn({ children, variant = 'primary', size = 'md', onClick, style
 export function Dot({ tone = 'var(--success)', size = 8, pulse }: { tone?: string; size?: number; pulse?: boolean }) {
   return (
     <span style={{ position: 'relative', display: 'inline-flex', width: size, height: size }}>
-      {pulse && <span style={{ position: 'absolute', inset: -3, borderRadius: '50%', border: `1.5px solid ${tone}`, animation: 'nn-pulse 1.8s var(--ease) infinite' }} />}
+      {pulse && <span className="nn-loop" style={{ position: 'absolute', inset: -3, borderRadius: '50%', border: `1.5px solid ${tone}`, animation: 'nn-pulse 1.8s var(--ease) infinite' }} />}
       <span style={{ width: size, height: size, borderRadius: '50%', background: tone }} />
     </span>
   )

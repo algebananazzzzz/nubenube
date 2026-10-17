@@ -2,7 +2,7 @@
 //! for the Insights graph, per-app time, discovered apps, and a meta table
 //! holding the running timer so it survives a restart.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
@@ -172,6 +172,46 @@ pub fn add_app_time(conn: &Connection, day: &str, app: &str, focus: f64, distrac
     .map(|_| ())
 }
 
+/// Per-tick slot, app-time, and known-app writes held in memory between
+/// flushes, so the tick doesn't write the database every second.
+#[derive(Default)]
+pub struct Batch {
+    slots: HashMap<(String, u32), (f64, f64)>,
+    apps: HashMap<(String, String), (f64, f64)>,
+    known: HashSet<String>,
+}
+
+impl Batch {
+    pub fn add_slot(&mut self, day: &str, slot: u32, focus: f64, distract: f64) {
+        let e = self.slots.entry((day.to_string(), slot)).or_default();
+        e.0 += focus;
+        e.1 += distract;
+    }
+
+    pub fn add_app_time(&mut self, day: &str, app: &str, focus: f64, distract: f64) {
+        let e = self.apps.entry((day.to_string(), app.to_string())).or_default();
+        e.0 += focus;
+        e.1 += distract;
+    }
+
+    pub fn record_known_app(&mut self, app_name: &str) {
+        self.known.insert(app_name.to_string());
+    }
+
+    pub fn write(&self, conn: &Connection) -> rusqlite::Result<()> {
+        for ((day, slot), (focus, distract)) in &self.slots {
+            add_slot(conn, day, *slot, *focus, *distract)?;
+        }
+        for ((day, app), (focus, distract)) in &self.apps {
+            add_app_time(conn, day, app, *focus, *distract)?;
+        }
+        for app in &self.known {
+            record_known_app(conn, app)?;
+        }
+        Ok(())
+    }
+}
+
 fn top_apps(conn: &Connection, col: &str, start: &str, end: &str) -> rusqlite::Result<Vec<AppSlice>> {
     let sql = format!(
         "SELECT app, SUM({col}) AS s FROM app_time WHERE day BETWEEN ?1 AND ?2
@@ -335,6 +375,29 @@ mod tests {
         save_day(&c, "2026-10-14", &Day { target: Some(1.0), ..Day::default() }).unwrap();
         let ins = insights(&c, "week", at("2026-10-13 12:00")).unwrap();
         assert_eq!((ins.earned, ins.spent, ins.targets_hit, ins.target_days), (150.0, 30.0, 1, 2));
+    }
+
+    #[test]
+    fn batch_sums_ticks_and_writes_on_top_of_stored_rows() {
+        let c = mem();
+        add_slot(&c, "2026-10-13", 40, 10.0, 0.0).unwrap();
+        let mut b = Batch::default();
+        b.add_slot("2026-10-13", 40, 1.0, 0.0);
+        b.add_slot("2026-10-13", 40, 1.0, 2.0);
+        b.add_slot("2026-10-13", 41, 0.0, 0.0);
+        b.add_app_time("2026-10-13", "Code", 1.0, 0.0);
+        b.add_app_time("2026-10-13", "Code", 1.0, 0.0);
+        b.record_known_app("Code");
+        let before = insights(&c, "today", at("2026-10-13 10:20")).unwrap();
+        assert_eq!(before.series[40].focus, 10.0);
+        assert!(before.focus_apps.is_empty());
+
+        b.write(&c).unwrap();
+        let ins = insights(&c, "today", at("2026-10-13 10:20")).unwrap();
+        assert_eq!((ins.series[40].focus, ins.series[40].distract), (12.0, 2.0));
+        assert!(ins.series[41].present);
+        assert_eq!((ins.focus_apps[0].name.as_str(), ins.focus_apps[0].secs), ("Code", 2.0));
+        assert_eq!(known_apps(&c).unwrap(), ["Code"]);
     }
 
     #[test]

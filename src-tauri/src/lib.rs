@@ -44,15 +44,6 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
-        // Close hides the main window; the app lives on in the tray.
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-            }
-        })
         .setup(|app| {
             // macOS: Accessory policy (no Dock icon) is the ONLY way a window can
             // float over another app's native-fullscreen Space; the NSWindow
@@ -156,6 +147,16 @@ pub fn run() {
             if let tauri::RunEvent::Reopen { .. } = event {
                 commands::show_main(app);
             }
-            let _ = (app, &event);
+            match event {
+                // Closing the main window destroys it to free its webview; the
+                // app lives on in the tray until Quit.
+                tauri::RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
+                tauri::RunEvent::Exit => {
+                    if let Err(e) = app.state::<AppState>().engine.lock().expect("engine mutex poisoned").flush() {
+                        log::error!("final flush failed: {e}");
+                    }
+                }
+                _ => {}
+            }
         });
 }

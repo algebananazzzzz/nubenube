@@ -66,7 +66,7 @@ function FinishPips({ tier, active, every, dark }: { tier: number; active: boole
         const done = active && i <= tier, cur = active && i === tier, col = hueSwatch(WARMTH[i].hue, dark)
         return (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 3, background: done ? col : 'transparent', border: `1.5px solid ${done ? col : 'var(--line-strong)'}`, animation: cur ? 'nn-pulse 1.8s var(--ease) infinite' : 'none' }} />
+            <span className="nn-loop" style={{ width: 10, height: 10, borderRadius: 3, background: done ? col : 'transparent', border: `1.5px solid ${done ? col : 'var(--line-strong)'}`, animation: cur ? 'nn-pulse 1.8s var(--ease) infinite' : 'none' }} />
             <span className="nn-num" title={`from ${i * every} min`} style={{ fontSize: 10.5, color: done ? col : 'var(--faint)' }}>×{m}</span>
           </div>
         )

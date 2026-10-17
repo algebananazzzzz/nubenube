@@ -1,6 +1,7 @@
 //! The live engine. Once a second it reads the foreground app (or the browser
-//! extension's focused site) and idle time, advances the economy, persists
-//! today, hands the extension its block list, and emits `focus-tick`. Commands
+//! extension's focused site) and idle time, advances the economy, hands the
+//! extension its block list, and emits `focus-tick`. Ticks are persisted every
+//! FLUSH_EVERY rather than every second, so the disk can stay idle. Commands
 //! (timer, targets, week plan) mutate it under the same mutex, so a command and
 //! a tick never interleave.
 
@@ -27,6 +28,8 @@ const MAX_TICK_DT: f64 = 5.0;
 /// companion's tint to neutral and back.
 const SWITCH_GRACE: u32 = 3;
 const TIMER_KEY: &str = "timer";
+/// A crash loses at most this much tracking.
+const FLUSH_EVERY: Duration = Duration::from_secs(30);
 
 #[derive(Serialize, Clone)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -52,6 +55,10 @@ pub struct Engine {
     /// Consecutive ticks with no focused app (see SWITCH_GRACE).
     blank_ticks: u32,
     browser: browser::Shared,
+    batch: db::Batch,
+    /// Days of `week` changed since the last flush.
+    dirty: [bool; 7],
+    last_flush: Instant,
 }
 
 fn weekday(d: NaiveDate) -> usize {
@@ -89,6 +96,9 @@ impl Engine {
             last_app: String::new(),
             blank_ticks: 0,
             browser,
+            batch: db::Batch::default(),
+            dirty: [false; 7],
+            last_flush: Instant::now(),
         })
     }
 
@@ -115,6 +125,7 @@ impl Engine {
         let date = Local::now().date_naive();
         let monday = db::monday_of(date);
         if monday != self.monday {
+            self.flush()?;
             self.week = load_week(&self.conn, monday)?;
             self.monday = monday;
         }
@@ -123,6 +134,22 @@ impl Engine {
 
     fn save_day(&self, i: usize) -> rusqlite::Result<()> {
         db::save_day(&self.conn, &db::day_id(self.monday + chrono::Duration::days(i as i64)), &self.week[i])
+    }
+
+    /// Write everything the tick has held in memory. Anything that reads the
+    /// database for live numbers flushes first.
+    pub fn flush(&mut self) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        self.batch.write(&tx)?;
+        for i in (0..7).filter(|&i| self.dirty[i]) {
+            self.save_day(i)?;
+        }
+        self.save_timer()?;
+        tx.commit()?;
+        self.batch = db::Batch::default();
+        self.dirty = [false; 7];
+        self.last_flush = Instant::now();
+        Ok(())
     }
 
     fn save_timer(&self) -> rusqlite::Result<()> {
@@ -192,20 +219,20 @@ impl Engine {
         let day = db::day_id(date);
         let local = Local::now();
         let slot = (local.hour() * 60 + local.minute()) / db::SLOT_MINUTES;
-        let tx = self.conn.unchecked_transaction()?;
         if !snap.app_name.is_empty() && snap.app_name != self.last_app {
-            db::record_known_app(&tx, &snap.app_name)?;
+            self.batch.record_known_app(&snap.app_name);
         }
-        db::save_day(&tx, &day, &self.week[wd])?;
+        self.dirty[wd] = true;
         if !away {
-            db::add_slot(&tx, &day, slot, focus, distract)?;
+            self.batch.add_slot(&day, slot, focus, distract);
         }
         if !name.is_empty() && (focus > 0.0 || distract > 0.0) {
-            db::add_app_time(&tx, &day, &name, focus, distract)?;
+            self.batch.add_app_time(&day, &name, focus, distract);
         }
-        self.save_timer()?;
-        tx.commit()?;
         self.last_app = snap.app_name;
+        if !events.is_empty() || self.last_flush.elapsed() >= FLUSH_EVERY {
+            self.flush()?;
+        }
 
         for ev in events {
             let ev = match ev {

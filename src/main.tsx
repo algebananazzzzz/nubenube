@@ -13,6 +13,11 @@ try {
   document.documentElement.setAttribute('data-theme', 'dark')
 }
 
+const markFocus = () => document.documentElement.toggleAttribute('data-unfocused', !document.hasFocus())
+window.addEventListener('focus', markFocus)
+window.addEventListener('blur', markFocus)
+markFocus()
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

@@ -74,7 +74,7 @@ function Face({ mood, B }: { mood: Mood; B: number }) {
     <svg width={B} height={B} viewBox={`0 0 ${B} ${B}`} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
       <ellipse cx={cx - dx - rx * 0.8} cy={B * 0.57} rx={B * 0.08} ry={B * 0.048} fill="var(--clay-cheek)" opacity={cheek} />
       <ellipse cx={cx + dx + rx * 0.8} cy={B * 0.57} rx={B * 0.08} ry={B * 0.048} fill="var(--clay-cheek)" opacity={cheek} />
-      <g style={{ animation: closed ? 'none' : 'nn-blink 5.5s steps(1) infinite', transformOrigin: `${cx}px ${eyeY}px` }}>
+      <g className="nn-loop" style={{ animation: closed ? 'none' : 'nn-blink 5.5s steps(1) infinite', transformOrigin: `${cx}px ${eyeY}px` }}>
         <Eye x={cx - dx} /><Eye x={cx + dx} />
       </g>
       {mouth}
@@ -94,14 +94,18 @@ export function Nube({ mood, size = 200, glow = false }: { mood: Mood; size?: nu
 
   return (
     <div style={{ position: 'relative', width: s, height: s * 1.04, transform: sink, transition: 'transform .7s var(--ease-soft)' }}>
-      <div style={{ position: 'absolute', left: '50%', bottom: s * 0.02, width: s * 0.5, height: s * 0.06, transform: 'translateX(-50%)', borderRadius: '50%', background: 'rgba(0,0,0,.10)', filter: 'blur(4px)' }} />
+      {/* Shadow and glow are radial gradients, not filter: blur(): WebKitGTK
+          re-rasterizes a blurred layer on every animation frame. The glow's
+          stops trace a Gaussian falloff and its box spans the blur's reach. */}
+      <div style={{ position: 'absolute', left: '50%', bottom: s * 0.02 - 8, width: s * 0.5 + 16, height: s * 0.06 + 16, transform: 'translateX(-50%)', background: 'radial-gradient(closest-side, rgba(0,0,0,.10) 50%, transparent)' }} />
 
-      <div style={{ position: 'absolute', inset: 0, animation: float, opacity: bodyOpacity, transition: 'opacity .7s' }}>
+      <div className="nn-loop" style={{ position: 'absolute', inset: 0, animation: float, opacity: bodyOpacity, transition: 'opacity .7s' }}>
         {glow && !low && (
-          <div style={{
-            position: 'absolute', left: '50%', top: s * 0.1 + B / 2, width: B * 1.2, height: B * 1.2,
-            transform: 'translate(-50%,-50%)', borderRadius: '50%', background: 'var(--clay-mid)',
-            filter: `blur(${s * 0.08}px)`, opacity: 0.55, animation: 'nn-pulse 2.6s var(--ease) infinite',
+          <div className="nn-loop" style={{
+            position: 'absolute', left: '50%', top: s * 0.1 + B / 2, width: B * 1.2 + s * 0.32, height: B * 1.2 + s * 0.32,
+            transform: 'translate(-50%,-50%)',
+            background: 'radial-gradient(closest-side, var(--clay-mid) 52%, color-mix(in srgb, var(--clay-mid) 84%, transparent) 64%, color-mix(in srgb, var(--clay-mid) 50%, transparent) 76%, color-mix(in srgb, var(--clay-mid) 16%, transparent) 88%, transparent)',
+            opacity: 0.55, animation: 'nn-pulse 2.6s var(--ease) infinite',
             pointerEvents: 'none',
           }} />
         )}
