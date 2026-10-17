@@ -2,11 +2,9 @@
 
 # NubeNube ☁️
 
-**A desktop focus companion: focus timers earn rest, distractions spend it.**
+**Personalized desktop focus companion that incentivises users to maintain a healthy work-rest ratio.**
 
-Set a work target for the day, run focus timers, and bank rest for later. Every few minutes of focus earns a minute of rest; time on a distracting app spends it. A small cloud creature, your *Nube*, shows how the day is going at a glance.
-
-Local-first. No accounts, no servers, no telemetry. NubeNube watches which app is in front and nothing leaves your machine.
+NubeNube tracks work hours and encourages users to commit to balanced work targets on individual weekdays to earn rest time for the rest of the week. It monitors app and browser activity, and ships with a browser extension that blocks distracting sites during Pomodoro-style focus sessions. A floating desktop widget reminds users to stay on task and complete the day's work target. Built with Rust and Tauri, with a React frontend.
 
 ![NubeNube home screen with a running focus timer](docs/images/home.png)
 
