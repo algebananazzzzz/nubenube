@@ -93,6 +93,7 @@ function Toast() {
 }
 
 const TITLES: Record<string, string> = { insights: 'Insights', rules: 'Rules', sources: 'Apps & Sites', settings: 'Settings' }
+const IS_MAC = navigator.userAgent.includes('Mac')
 
 export function AppShell() {
   const subscribe = useFocus((s) => s.subscribe)
@@ -116,10 +117,10 @@ export function AppShell() {
 
   return (
     <div className="nn-app" data-theme={f.theme} style={{ ...themeVars(f.theme, f.clay), position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--page)' }}>
-      {/* titlebar — native traffic lights overlay the left inset */}
-      <div data-tauri-drag-region style={{ position: 'relative', height: 40, flexShrink: 0, borderBottom: '1px solid var(--line-faint)', background: 'var(--surface-faint)' }}>
+      {/* macOS overlays the traffic lights on the page; elsewhere the OS titlebar already shows the name */}
+      {IS_MAC && <div data-tauri-drag-region style={{ position: 'relative', height: 40, flexShrink: 0, borderBottom: '1px solid var(--line-faint)', background: 'var(--surface-faint)' }}>
         <span className="nn-disp" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--text)', pointerEvents: 'none' }}>NubeNube</span>
-      </div>
+      </div>}
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <div style={{ width: 210, flexShrink: 0, background: 'var(--surface-faint)', borderRight: '1px solid var(--line-faint)', display: 'flex', flexDirection: 'column', padding: 13 }}>
