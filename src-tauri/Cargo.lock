@@ -2816,7 +2816,7 @@ dependencies = [
 
 [[package]]
 name = "nubenube"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "active-win-pos-rs",
  "base64 0.22.1",
