@@ -108,7 +108,7 @@ function Hero() {
         </div>
         <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.5, marginTop: 8, textWrap: 'pretty' }}>{cue.line}</div>
         <div style={{ flex: 1, minHeight: 16 }} />
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
+        {!idle && <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
           <Eyebrow style={{ fontSize: 10.5 }}>{eyebrow}</Eyebrow>
           <span style={{ flex: 1 }} />
           {f.inTimer && (
@@ -116,20 +116,21 @@ function Hero() {
               {f.nextTierIn ? `×${f.finish} · ×${FINISH[f.tier + 1]} in ${fmtCountdown(Math.min(f.nextTierIn, f.left))}` : `×${f.finish} max bonus`}
             </Pill>
           )}
-        </div>
+        </div>}
         {f.inTimer || f.state === 'drift'
           ? <div className="nn-num" style={{ fontSize: 56, fontWeight: 700, color: bigTone, lineHeight: 1, letterSpacing: '-.03em' }}>{big}</div>
           : (
             <div>
               <LenStepper len={len} onChange={setPicked} />
               <div style={{ marginTop: 14 }}><QuickPicks onPick={setPicked} selected={len} /></div>
-              <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 10, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13, color: 'var(--text)', marginTop: 14, lineHeight: 1.5 }}>
                 {`Finish to earn ${fmtHM((len * 60) / s.ratio)} of rest, plus a ${fmtHM(projectBonus(0, len * 60, s.finishEvery, s.ratio))} bonus.`}
               </div>
+              <Btn variant="primary" size="lg" full onClick={() => void startTimer(len)} style={{ marginTop: 14 }}>Start</Btn>
             </div>
           )}
         {f.inTimer && <div style={{ marginTop: 14 }}><Bar pct={prog} height={8} color={hueSwatch(f.phase.hue, f.dark)} /></div>}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14, flexWrap: 'wrap', minHeight: 30 }}>
+        {!idle && <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14, flexWrap: 'wrap', minHeight: 30 }}>
           <FinishPips tier={f.tier} active={f.state === 'timer'} every={s.finishEvery} dark={f.dark} />
           {earning && <span className="nn-num" style={{ fontSize: 12, color: 'var(--success)' }}>{earning}</span>}
           <span style={{ flex: 1 }} />
@@ -138,8 +139,7 @@ function Hero() {
             : f.inTimer && <Btn variant="line" size="sm" onClick={() => void pauseTimer()}>{`Pause · ${fmtCountdown(f.pauseLeft)}`}</Btn>}
           {f.inTimer && <Btn variant="line" size="sm" onClick={() => void stopTimer()}>Stop early</Btn>}
           {f.state === 'drift' && <QuickPicks onPick={(m) => void startTimer(m)} />}
-          {idle && <Btn variant="primary" size="sm" onClick={() => void startTimer(len)}>{`Start ${presetLabel(len)}`}</Btn>}
-        </div>
+        </div>}
       </div>
     </Card>
   )
