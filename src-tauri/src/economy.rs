@@ -1,9 +1,10 @@
 //! The focus economy. Time inside a running timer earns rest at 1/ratio per
 //! second; a Rest app or site spends it 1:1 and ends any running timer; the weekly bank is
-//! Σ(earned − spent) since Monday and may go negative. A timer may pause for
-//! up to PAUSE_SECS in total, during which it neither counts down nor earns;
-//! Rest ends it, and so does running out of pause. Pure, so the rules are
-//! tested apart from the OS watcher and the database.
+//! Σ(earned − spent) since Monday and may go negative. A timer may break
+//! (pause, or go Away) for up to PAUSE_SECS in total, during which it neither
+//! counts down nor earns. Past that budget a break redlines for REDLINE_SECS,
+//! then the timer is lost; Rest ends it at once. Pure, so the rules are tested
+//! apart from the OS watcher and the database.
 
 use serde::{Deserialize, Serialize};
 
@@ -15,8 +16,16 @@ pub const FINISH: [f64; 4] = [1.0, 1.15, 1.3, 1.5];
 /// Pause budget per timer, shared across all of its pauses.
 pub const PAUSE_SECS: f64 = 300.0;
 
+/// Grace once the break budget is spent. Each break past the budget gets a
+/// fresh one.
+pub const REDLINE_SECS: f64 = 60.0;
+
 fn full_pause() -> f64 {
     PAUSE_SECS
+}
+
+fn full_redline() -> f64 {
+    REDLINE_SECS
 }
 
 pub fn finish_tier(run_secs: f64, every_min: f64) -> usize {
@@ -65,16 +74,18 @@ pub struct Timer {
     pub earned: f64,
     #[serde(default)]
     pub paused: bool,
-    /// Pause budget left. A pause drains it in wall-clock time, Away included,
-    /// and the timer fails when it reaches zero.
+    /// Break budget left, drained in wall-clock time by a pause or by Away.
     #[serde(default = "full_pause")]
     pub pause_left: f64,
+    /// Redline left in the current break; reset whenever the break ends.
+    #[serde(default = "full_redline")]
+    pub redline_left: f64,
 }
 
 impl Timer {
     pub fn new(minutes: f64) -> Self {
         let len = minutes * 60.0;
-        Timer { len, left: len, run: 0.0, pending: 0.0, earned: 0.0, paused: false, pause_left: PAUSE_SECS }
+        Timer { len, left: len, run: 0.0, pending: 0.0, earned: 0.0, paused: false, pause_left: PAUSE_SECS, redline_left: REDLINE_SECS }
     }
 
     pub fn pause(&mut self) -> Result<(), &'static str> {
@@ -90,6 +101,7 @@ impl Timer {
             return Err("The timer isn't paused");
         }
         self.paused = false;
+        self.redline_left = REDLINE_SECS;
         Ok(())
     }
 }
@@ -108,8 +120,22 @@ pub enum Event {
     /// A Rest app or site came to the front mid-timer, which ends the timer.
     Broken { forfeited: f64 },
     TargetHit { bonus: f64 },
-    /// The pause budget ran out before a resume, which ends the timer.
-    PauseExpired { forfeited: f64 },
+    /// A break outlasted its budget; the redline countdown starts.
+    Redline,
+    /// The redline ran out before the break ended, which ends the timer.
+    Lost(Lost),
+}
+
+/// A timer lost to a break that outlasted the redline.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Lost {
+    pub len: f64,
+    /// Base rest earned during the timer, which is kept.
+    pub earned: f64,
+    /// The finish bonus that was accrued and is now gone.
+    pub forfeited: f64,
+    pub focused: f64,
 }
 
 pub fn state(timer: bool, fg: Foreground) -> &'static str {
@@ -145,27 +171,33 @@ pub fn step(timer: &mut Option<Timer>, day: &mut Day, rules: &Rules, fg: Foregro
     let Some(t) = timer.as_mut() else {
         return events;
     };
-    if t.paused {
+    if t.paused || fg == Foreground::Away {
+        let over = dt - t.pause_left;
         t.pause_left = (t.pause_left - dt).max(0.0);
-        if t.pause_left <= 0.0 {
-            events.push(Event::PauseExpired { forfeited: t.pending });
-            *timer = None;
+        if over > 0.0 {
+            if t.redline_left >= REDLINE_SECS {
+                events.push(Event::Redline);
+            }
+            t.redline_left -= over;
+            if t.redline_left <= 0.0 {
+                events.push(Event::Lost(Lost { len: t.len, earned: t.earned, forfeited: t.pending, focused: t.run }));
+                *timer = None;
+            }
         }
         return events;
     }
+    t.redline_left = REDLINE_SECS;
 
     t.left -= dt;
-    if fg == Foreground::Focus {
-        let base = dt / rules.ratio;
-        day.focus += dt;
-        day.earned += base;
-        t.earned += base;
-        t.run += dt;
-        t.pending += (finish_at(t.run, rules.finish_every_min) - 1.0) * base;
-        if !day.hit && day.target.is_some_and(|tg| day.focus >= tg) {
-            apply_target(day, day.target, rules.target_bonus_secs);
-            events.push(Event::TargetHit { bonus: rules.target_bonus_secs });
-        }
+    let base = dt / rules.ratio;
+    day.focus += dt;
+    day.earned += base;
+    t.earned += base;
+    t.run += dt;
+    t.pending += (finish_at(t.run, rules.finish_every_min) - 1.0) * base;
+    if !day.hit && day.target.is_some_and(|tg| day.focus >= tg) {
+        apply_target(day, day.target, rules.target_bonus_secs);
+        events.push(Event::TargetHit { bonus: rules.target_bonus_secs });
     }
 
     if t.left <= 0.0 {
@@ -257,12 +289,46 @@ mod tests {
     }
 
     #[test]
-    fn away_time_neither_earns_nor_spends_but_the_timer_runs() {
+    fn away_freezes_the_timer_and_drains_the_break_budget() {
         let mut t = Some(Timer::new(10.0));
         let mut d = Day::default();
         run(&mut t, &mut d, Foreground::Away, 120);
         assert_eq!(d, Day::default());
-        assert!(close(t.unwrap().left, 480.0));
+        let p = t.unwrap();
+        assert!(close(p.left, 600.0));
+        assert!(close(p.pause_left, PAUSE_SECS - 120.0));
+    }
+
+    #[test]
+    fn out_of_break_away_redlines_for_a_minute_then_loses_focus() {
+        let mut t = Some(Timer::new(60.0));
+        let mut d = Day::default();
+        run(&mut t, &mut d, Foreground::Focus, 1000);
+        let pending = t.as_ref().unwrap().pending;
+        assert!(run(&mut t, &mut d, Foreground::Away, 300).is_empty());
+        assert_eq!(run(&mut t, &mut d, Foreground::Away, 1), vec![Event::Redline]);
+        assert!(run(&mut t, &mut d, Foreground::Away, 58).is_empty());
+        assert!(close(t.as_ref().unwrap().redline_left, 1.0));
+        let ev = run(&mut t, &mut d, Foreground::Away, 1);
+        assert!(t.is_none());
+        assert!(matches!(&ev[..], [Event::Lost(l)] if close(l.len, 3600.0) && close(l.earned, 200.0) && close(l.forfeited, pending) && close(l.focused, 1000.0)));
+        assert!(close(d.earned, 1000.0 / 5.0));
+    }
+
+    #[test]
+    fn coming_back_in_the_redline_keeps_the_timer_and_the_next_break_redlines_afresh() {
+        let mut t = Some(Timer::new(60.0));
+        let mut d = Day::default();
+        run(&mut t, &mut d, Foreground::Away, 340);
+        assert!(close(t.as_ref().unwrap().redline_left, REDLINE_SECS - 40.0));
+        run(&mut t, &mut d, Foreground::Focus, 10);
+        let p = t.as_ref().unwrap();
+        assert!(close(p.left, 3590.0));
+        assert!(close(p.redline_left, REDLINE_SECS));
+        assert_eq!(run(&mut t, &mut d, Foreground::Away, 1), vec![Event::Redline]);
+        assert!(run(&mut t, &mut d, Foreground::Away, 58).is_empty());
+        assert!(t.is_some());
+        assert!(matches!(run(&mut t, &mut d, Foreground::Away, 1)[..], [Event::Lost(_)]));
     }
 
     #[test]
@@ -301,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn running_out_of_pause_ends_the_timer_and_forfeits_the_bonus() {
+    fn running_out_of_pause_redlines_then_loses_focus() {
         let mut t = Some(Timer::new(60.0));
         let mut d = Day::default();
         run(&mut t, &mut d, Foreground::Focus, 1000);
@@ -311,12 +377,25 @@ mod tests {
         run(&mut t, &mut d, Foreground::Away, 200);
         t.as_mut().unwrap().resume().unwrap();
         t.as_mut().unwrap().pause().unwrap();
-        assert!(run(&mut t, &mut d, Foreground::Focus, 99).is_empty());
-        assert!(t.is_some());
+        assert!(run(&mut t, &mut d, Foreground::Focus, 100).is_empty());
+        assert_eq!(run(&mut t, &mut d, Foreground::Focus, 1), vec![Event::Redline]);
+        assert!(run(&mut t, &mut d, Foreground::Focus, 58).is_empty());
         let ev = run(&mut t, &mut d, Foreground::Focus, 1);
         assert!(t.is_none());
-        assert!(matches!(ev[..], [Event::PauseExpired { forfeited }] if close(forfeited, pending)));
+        assert!(matches!(&ev[..], [Event::Lost(l)] if close(l.forfeited, pending)));
         assert!(close(d.earned, 1000.0 / 5.0));
+    }
+
+    #[test]
+    fn resuming_in_the_redline_resets_it() {
+        let mut t = Some(Timer::new(60.0));
+        let mut d = Day::default();
+        t.as_mut().unwrap().pause().unwrap();
+        run(&mut t, &mut d, Foreground::Focus, 330);
+        t.as_mut().unwrap().resume().unwrap();
+        assert!(close(t.as_ref().unwrap().redline_left, REDLINE_SECS));
+        t.as_mut().unwrap().pause().unwrap();
+        assert_eq!(run(&mut t, &mut d, Foreground::Focus, 1), vec![Event::Redline]);
     }
 
     #[test]
@@ -342,6 +421,7 @@ mod tests {
         let t: Timer = serde_json::from_str(r#"{"len":600,"left":300,"run":300,"pending":0,"earned":60}"#).unwrap();
         assert!(!t.paused);
         assert!(close(t.pause_left, PAUSE_SECS));
+        assert!(close(t.redline_left, REDLINE_SECS));
     }
 
     #[test]

@@ -23,16 +23,21 @@ export type FocusTick = {
   run: number // seconds of unbroken focus in the running timer
   pending: number // finish bonus accrued so far
   paused: boolean
-  pauseLeft: number // pause budget left for the running timer
+  pauseLeft: number // break budget left for the running timer (pauses and away)
+  redline: number // redline seconds left; 0 outside a redline
+  lost: Lost | null // the last timer lost to a redline, until dismissed or a new timer starts
   weekday: number // 0 = Monday
   week: Day[]
   bank: number // may go negative
   extension: boolean // the browser extension is connected
 }
 
+export type Lost = { len: number; earned: number; forfeited: number; focused: number }
+
 export type FocusEvent =
   | { kind: 'timerFinished'; earned: number; bonus: number }
   | { kind: 'targetHit'; bonus: number }
+  | { kind: 'redline' }
 
 export type AppClass = 'work' | 'neutral' | 'rest'
 

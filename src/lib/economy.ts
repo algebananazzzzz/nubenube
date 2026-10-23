@@ -1,8 +1,10 @@
 // Client-side mirror of the economy constants in src-tauri/src/economy.rs, for
 // projections the backend doesn't send (bonus forecasts, today's pace). Keep
-// FINISH and finishTier in sync with Rust.
+// FINISH, finishTier and REDLINE_SECS in sync with Rust.
 
 export const FINISH = [1, 1.15, 1.3, 1.5]
+
+export const REDLINE_SECS = 60
 
 export const finishTier = (run: number, every: number) =>
   Math.min(FINISH.length - 1, Math.max(0, Math.floor(run / Math.max(1, every * 60))))

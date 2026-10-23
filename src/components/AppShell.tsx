@@ -108,7 +108,7 @@ export function AppShell() {
   useEffect(() => {
     const off = events.onFocusEvent((e) => {
       if (e.kind === 'timerFinished') say(`Session done! +${fmtHM(e.earned)} rest earned`)
-      else say(`Target hit! +${fmtHM(e.bonus)} rest earned`)
+      else if (e.kind === 'targetHit') say(`Target hit! +${fmtHM(e.bonus)} rest earned`)
     })
     return () => { void off.then((fn) => fn()) }
   }, [])

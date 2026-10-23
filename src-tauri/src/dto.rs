@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use crate::economy::Day;
+use crate::economy::{Day, Lost};
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -13,7 +13,8 @@ pub struct FocusTick {
     pub app: String,
     /// "work" | "neutral" | "rest"
     pub app_class: String,
-    /// Away (idle past the threshold): nothing is earned or spent.
+    /// Away (idle past the threshold): nothing is earned or spent, and a
+    /// running timer is on a break.
     pub away: bool,
     /// Timer seconds left and length; 0 with no timer running.
     pub left: f64,
@@ -21,8 +22,12 @@ pub struct FocusTick {
     pub run: f64,
     pub pending: f64,
     pub paused: bool,
-    /// Pause budget left for the running timer.
+    /// Break budget left for the running timer.
     pub pause_left: f64,
+    /// Redline seconds left; 0 outside a redline.
+    pub redline: f64,
+    /// The last timer lost to a redline, until dismissed or a new timer starts.
+    pub lost: Option<Lost>,
     /// 0 = Monday.
     pub weekday: usize,
     pub week: Vec<Day>,

@@ -123,6 +123,7 @@ pub fn run() {
             commands::stop_timer,
             commands::pause_timer,
             commands::resume_timer,
+            commands::dismiss_lost,
             commands::set_target,
             commands::set_day_target,
             commands::set_day_rest,

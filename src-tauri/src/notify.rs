@@ -28,8 +28,12 @@ pub fn timer_broken(app: &AppHandle, app_name: &str) {
     show(app, "Focus session ended", format!("{app_name} is a Rest app, so you're resting now. Start a new session when you're back."));
 }
 
-pub fn pause_expired(app: &AppHandle) {
-    show(app, "Focus session ended", "The 5-minute pause ran out. Start a new session when you're back.".into());
+pub fn redline(app: &AppHandle) {
+    show(app, "Break's over", "Come back within a minute or the timer ends.".into());
+}
+
+pub fn focus_lost(app: &AppHandle) {
+    show(app, "Focus lost", "Your break ran out, so the timer ended.".into());
 }
 
 #[cfg(test)]

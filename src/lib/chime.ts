@@ -20,10 +20,12 @@ const VOICES: Record<ChimeVoice, Voice> = {
 export const CHIME_VOICES = Object.keys(VOICES) as ChimeVoice[]
 
 // A note = [frequency Hz, start offset secs]. `finish` is a calm rising fourth
-// (E5→A5); `drift` is a softer descending triad for when rest starts.
+// (E5→A5); `drift` is a softer descending triad for when rest starts; `redline`
+// repeats one high note so it reads as an alarm rather than a melody.
 const EVENTS: Record<string, [number, number][]> = {
   finish: [[659.25, 0], [880.0, 0.11]],
   drift: [[587.33, 0], [440.0, 0.13], [329.63, 0.26]],
+  redline: [[987.77, 0], [987.77, 0.16], [987.77, 0.32]],
 }
 
 export type ChimeEvent = keyof typeof EVENTS

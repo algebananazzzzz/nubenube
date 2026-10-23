@@ -11,6 +11,7 @@ import { api, events } from '../lib/api'
 import { rescue } from '../lib/rescue'
 import { hueSwatch, themeVars } from '../lib/clay'
 import { statusLine, useFocusView, type FocusView } from '../lib/derive'
+import { REDLINE_SECS } from '../lib/economy'
 import { fmtCountdown, fmtHM } from '../lib/format'
 import { Sky, Nube, skyBorder, skyTint } from './NubeCreature'
 import { Bar, Btn, Dot } from './ui'
@@ -30,6 +31,12 @@ function Grip() {
 // drains today's planned rest (going negative once it's overspent), and idle
 // fills toward today's target.
 function headline(f: FocusView): { value: string; label: string; note?: string; title?: string; tone: string; pct: number; bar: string } {
+  if (f.redline) {
+    return {
+      value: fmtCountdown(f.redline), label: 'left', note: `${fmtCountdown(f.left)} on timer`, tone: 'var(--critical)',
+      pct: f.redline / REDLINE_SECS, bar: 'var(--critical)',
+    }
+  }
   if (f.inTimer) {
     return {
       value: fmtCountdown(f.left), label: 'left', tone: 'var(--ink)',
@@ -45,6 +52,13 @@ function headline(f: FocusView): { value: string; label: string; note?: string; 
       value: fmtHM(left), label: `of ${fmtHM(plan)}`, note: 'rest today',
       title: `${fmtHM(left)} left of the ${fmtHM(plan)} rest planned for today`,
       tone, pct: plan > 0 ? left / plan : 0, bar: tone,
+    }
+  }
+  if (f.lost) {
+    return {
+      value: `+${fmtHM(f.lost.earned)}`, label: 'rest kept', note: `${fmtHM(f.lost.focused)} focused`,
+      title: `${fmtHM(f.lost.focused)} focused of ${fmtHM(f.lost.len)}${f.lost.forfeited >= 30 ? `, ${fmtHM(f.lost.forfeited)} bonus lost` : ''}`,
+      tone: 'var(--success)', pct: f.lost.focused / Math.max(1, f.lost.len), bar: 'var(--critical)',
     }
   }
   return {
@@ -100,6 +114,7 @@ function CompanionCard({ f, onMinimize, innerRef }: { f: FocusView; onMinimize: 
               </svg>
             </button>
           )}
+          {f.lost && <button onClick={() => void api.dismissLost().catch((e) => console.warn('[nube] dismiss failed', e))} title="Dismiss" style={{ flexShrink: 0, width: 32, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--text)', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>✕</button>}
           <button onClick={onMinimize} title="Minimize" style={{ flexShrink: 0, width: 32, borderRadius: 'var(--r-md)', border: '1px solid var(--line)', background: 'var(--surface-faint)', color: 'var(--text)', cursor: 'pointer', fontSize: 15, fontWeight: 700 }}>–</button>
         </div>
       </div>
@@ -155,6 +170,7 @@ export function Companion() {
     const off = events.onFocusEvent((e) => {
       const p = usePrefs.getState()
       if (e.kind === 'timerFinished' && p.sound) playChime(p.chimeVoice, p.chimeVolume, 'finish')
+      if (e.kind === 'redline' && p.sound) playChime(p.chimeVoice, p.chimeVolume, 'redline')
     })
     return () => { void off.then((fn) => fn()) }
   }, [])
