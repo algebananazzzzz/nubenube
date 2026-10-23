@@ -85,7 +85,8 @@ Do NOT rely on `npm run lint`; the lint config is pre-broken and not a signal.
   foreground ends a running timer (bonus forfeited).
 - `engine.rs`: `Engine` behind `Arc<Mutex<>>`: 1 s tick (watcher → economy →
   DB → `focus-tick` + `focus-event`), timer/target/plan commands, running timer
-  persisted in `meta` so it survives restarts. Idle ≥ 120 s = Away.
+  persisted in `meta` so it survives restarts. Idle ≥ 120 s = Away, which
+  breaks a running timer like a pause.
 - `db.rs`: `focus.db` (the pre-redesign `nube.db` is ignored): `days`,
   15-minute `slots`, `app_time`, `known_apps`, `meta`; `insights()` buckets.
 - `settings.rs`: `settings.json`; apps map name → `work|neutral|rest`
@@ -105,10 +106,11 @@ Do NOT rely on `npm run lint`; the lint config is pre-broken and not a signal.
   Sites search, named as the watcher reports them.
 
 Commands (see `commands.rs`): `get_focus`, `start_timer`, `stop_timer`,
-`pause_timer` / `resume_timer` (5 min pause budget per timer; running out ends the timer),
+`pause_timer` / `resume_timer` (5 min break budget per timer, shared with Away;
+past it each break gets a 1 min redline, then the timer is lost), `dismiss_lost`,
 `set_target` (raise-only), `set_day_target`, `set_day_rest`, `get_insights`,
 `get_settings`, `save_settings`, `list_apps`,
 `tracking_helper`, `install_tracking_helper`, `install_browser_extension`, the
 window controls `nube_open_main` / `nube_set_companion` / `nube_resize_companion`,
 and `check_update` / `install_update`. Events: `focus-tick` (every second) and
-`focus-event` (`timerFinished`, `targetHit`).
+`focus-event` (`timerFinished`, `targetHit`, `redline`).
