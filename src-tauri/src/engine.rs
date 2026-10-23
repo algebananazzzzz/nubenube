@@ -15,11 +15,12 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::dto::FocusTick;
-use crate::economy::{self, Day, Event, Foreground, Timer};
+use crate::economy::{self, Day, Event, Foreground, Lost, Timer, REDLINE_SECS};
 use crate::settings::{self, Settings};
 use crate::{browser, db, notify, watcher};
 
-/// Idle this long and you're away: nothing is earned or spent.
+/// Idle this long and you're away: nothing is earned or spent, and a running
+/// timer breaks.
 const IDLE_SECS: u64 = 120;
 /// Cap on one tick's elapsed time so a suspend/resume gap isn't booked as focus.
 const MAX_TICK_DT: f64 = 5.0;
@@ -36,6 +37,7 @@ const FLUSH_EVERY: Duration = Duration::from_secs(30);
 pub enum FocusEvent {
     TimerFinished { earned: f64, bonus: f64 },
     TargetHit { bonus: f64 },
+    Redline,
 }
 
 pub struct Engine {
@@ -44,6 +46,7 @@ pub struct Engine {
     monday: NaiveDate,
     week: Vec<Day>,
     timer: Option<Timer>,
+    lost: Option<Lost>,
     state: &'static str,
     app: String,
     /// "work" | "neutral" | "rest", from the site when listed, else the app.
@@ -88,6 +91,7 @@ impl Engine {
             week,
             state: economy::state(timer.is_some(), Foreground::Focus),
             timer,
+            lost: None,
             app: String::new(),
             app_class: "neutral".into(),
             away: false,
@@ -172,6 +176,8 @@ impl Engine {
             pending: t.map_or(0.0, |t| t.pending),
             paused: t.is_some_and(|t| t.paused),
             pause_left: t.map_or(0.0, |t| t.pause_left),
+            redline: t.map_or(0.0, |t| if t.redline_left < REDLINE_SECS { t.redline_left.max(0.0) } else { 0.0 }),
+            lost: self.lost.clone(),
             weekday: weekday(Local::now().date_naive()),
             week: self.week.clone(),
             bank: economy::bank(&self.week),
@@ -245,8 +251,13 @@ impl Engine {
                     continue;
                 }
                 Event::TargetHit { bonus } => FocusEvent::TargetHit { bonus },
-                Event::PauseExpired { .. } => {
-                    notify::pause_expired(app);
+                Event::Redline => {
+                    notify::redline(app);
+                    FocusEvent::Redline
+                }
+                Event::Lost(lost) => {
+                    notify::focus_lost(app);
+                    self.lost = Some(lost);
                     continue;
                 }
             };
@@ -270,6 +281,7 @@ impl Engine {
             return Err(format!("Timer length must be 1–480 minutes, got {minutes}"));
         }
         self.timer = Some(Timer::new(minutes));
+        self.lost = None;
         self.state = economy::state(true, Foreground::Focus);
         self.save_timer().map_err(|e| e.to_string())
     }
@@ -290,6 +302,10 @@ impl Engine {
     pub fn resume_timer(&mut self) -> Result<(), String> {
         self.timer.as_mut().ok_or("No timer is running")?.resume()?;
         self.save_timer().map_err(|e| e.to_string())
+    }
+
+    pub fn dismiss_lost(&mut self) {
+        self.lost = None;
     }
 
     /// Today's target can only go up, so it can't be lowered to dodge the bonus rule.

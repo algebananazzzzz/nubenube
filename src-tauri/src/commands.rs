@@ -78,6 +78,14 @@ pub fn resume_timer(app: AppHandle, state: State<AppState>) -> Result<(), String
 }
 
 #[tauri::command]
+pub fn dismiss_lost(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    mutate(&app, &state, |e| {
+        e.dismiss_lost();
+        Ok(())
+    })
+}
+
+#[tauri::command]
 pub fn set_target(app: AppHandle, state: State<AppState>, secs: f64) -> Result<(), String> {
     mutate(&app, &state, |e| e.set_target(secs))
 }

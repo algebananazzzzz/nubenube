@@ -7,6 +7,7 @@ import { hueSwatch } from '../lib/clay'
 import { useFocusView, useRules, type FocusView } from '../lib/derive'
 import { FINISH, LEN_MAX, LEN_MIN, LEN_STEP, WARMTH, clampLen, projectBonus } from '../lib/economy'
 import { DAYS, fmtCountdown, fmtHM } from '../lib/format'
+import type { Lost } from '../types'
 import { say } from '../store/toast'
 import { Sky, Nube } from '../components/NubeCreature'
 import { Bar, Btn, Card, Dot, Eyebrow, Pill, Ring, Section, Tile } from '../components/ui'
@@ -19,6 +20,7 @@ const stopTimer = () =>
     .catch(report)
 const pauseTimer = () => api.pauseTimer().catch(report)
 const resumeTimer = () => api.resumeTimer().catch(report)
+const dismissLost = () => api.dismissLost().catch(report)
 const setTarget = (secs: number) => api.setTarget(secs).catch(report)
 const setDayTarget = (day: number, secs: number | null) => api.setDayTarget(day, secs).catch(report)
 const setDayRest = (day: number, secs: number) => api.setDayRest(day, secs).catch(report)
@@ -26,8 +28,12 @@ const setDayRest = (day: number, secs: number) => api.setDayRest(day, secs).catc
 const presetLabel = (m: number) => (m >= 60 && m % 60 === 0 ? `${m / 60}h` : `${m}m`)
 
 function heroCopy(f: FocusView): { title: string; line: string; tone: string; pulse: boolean } {
-  if (f.paused) return { title: 'Paused', line: `Resume within ${fmtCountdown(f.pauseLeft)} or the timer ends.`, tone: 'var(--faint)', pulse: false }
-  if (f.away) return { title: 'Away', line: "Tracking pauses while you're away, so nothing is earned or spent.", tone: 'var(--faint)', pulse: false }
+  if (f.redline) return { title: 'Redline', line: `${f.paused ? 'Resume' : 'Come back'} within ${fmtCountdown(f.redline)} or the timer ends.`, tone: 'var(--critical)', pulse: true }
+  if (f.paused) return { title: 'Paused', line: `${fmtCountdown(f.pauseLeft)} of break left.`, tone: 'var(--faint)', pulse: false }
+  if (f.away) return f.inTimer
+    ? { title: 'Away', line: `Timer paused. ${fmtCountdown(f.pauseLeft)} of break left.`, tone: 'var(--faint)', pulse: false }
+    : { title: 'Away', line: "Tracking pauses while you're away, so nothing is earned or spent.", tone: 'var(--faint)', pulse: false }
+  if (f.lost) return { title: 'Focus lost', line: 'Your break ran out, so the timer ended.', tone: 'var(--critical)', pulse: false }
   switch (f.state) {
     case 'timer': return { title: `Focusing · ${f.app || 'NubeNube'}`, line: f.extension ? 'Rest sites are blocked, and opening a Rest app ends the timer.' : 'Opening a Rest app or site ends the timer.', tone: f.appClass === 'work' ? 'var(--success)' : hueSwatch(f.phase.hue, f.dark), pulse: true }
     case 'drift': return { title: `Resting · ${f.app}`, line: 'No session running, so this comes out of your earned rest.', tone: f.hp < 0.15 ? 'var(--critical)' : 'var(--warning)', pulse: true }
@@ -75,13 +81,31 @@ function FinishPips({ tier, active, every, dark }: { tier: number; active: boole
   )
 }
 
+function LostSummary({ lost }: { lost: Lost }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <span className="nn-num" style={{ fontSize: 56, fontWeight: 700, color: 'var(--success)', lineHeight: 1, letterSpacing: '-.03em' }}>+{fmtHM(lost.earned)}</span>
+        <span style={{ fontSize: 13, color: 'var(--faint)' }}>rest kept</span>
+      </div>
+      <div className="nn-num" style={{ fontSize: 13, color: 'var(--text)', marginTop: 12 }}>
+        {`${fmtHM(lost.focused)} focused of ${fmtHM(lost.len)}`}{lost.forfeited >= 30 && <span style={{ color: 'var(--critical)' }}>{` · ${fmtHM(lost.forfeited)} bonus lost`}</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+        <Btn variant="primary" size="lg" full onClick={() => void startTimer(Math.round(lost.len / 60))}>Start again</Btn>
+        <Btn variant="line" size="lg" onClick={() => void dismissLost()}>Dismiss</Btn>
+      </div>
+    </div>
+  )
+}
+
 function Hero() {
   const f = useFocusView(), s = useRules()
   const cue = heroCopy(f)
-  const big = f.inTimer ? fmtCountdown(f.left) : '−1×'
-  const bigTone = f.inTimer ? 'var(--ink)' : 'var(--warning)'
+  const big = f.redline ? fmtCountdown(f.redline) : f.inTimer ? fmtCountdown(f.left) : '−1×'
+  const bigTone = f.redline ? 'var(--critical)' : f.inTimer ? 'var(--ink)' : 'var(--warning)'
   const prog = f.inTimer ? 1 - f.left / Math.max(1, f.len) : 0
-  const eyebrow = f.inTimer ? `Timer · ${Math.round(f.len / 60)} min` : f.state === 'drift' ? 'Spending rest' : 'Start focusing'
+  const eyebrow = f.redline ? `Redline · ${fmtCountdown(f.left)} left on the timer` : f.inTimer ? `Timer · ${Math.round(f.len / 60)} min` : f.state === 'drift' ? 'Spending rest' : 'Start focusing'
   const earning = f.inTimer ? `Finish to earn +${fmtHM(f.len / s.ratio)} rest, +${fmtHM(f.projected)} bonus` : null
   // Stays null until the user adjusts, so the default follows presets once settings load.
   const [picked, setPicked] = useState<number | null>(null)
@@ -117,7 +141,8 @@ function Hero() {
             </Pill>
           )}
         </div>}
-        {f.inTimer || f.state === 'drift'
+        {f.lost ? <LostSummary lost={f.lost} />
+          : f.inTimer || f.state === 'drift'
           ? <div className="nn-num" style={{ fontSize: 56, fontWeight: 700, color: bigTone, lineHeight: 1, letterSpacing: '-.03em' }}>{big}</div>
           : (
             <div>
@@ -129,7 +154,7 @@ function Hero() {
               <Btn variant="primary" size="lg" full onClick={() => void startTimer(len)} style={{ marginTop: 14 }}>Start</Btn>
             </div>
           )}
-        {f.inTimer && <div style={{ marginTop: 14 }}><Bar pct={prog} height={8} color={hueSwatch(f.phase.hue, f.dark)} /></div>}
+        {f.inTimer && <div style={{ marginTop: 14 }}><Bar pct={prog} height={8} color={f.redline ? 'var(--critical)' : hueSwatch(f.phase.hue, f.dark)} /></div>}
         {!idle && <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14, flexWrap: 'wrap', minHeight: 30 }}>
           <FinishPips tier={f.tier} active={f.state === 'timer'} every={s.finishEvery} dark={f.dark} />
           {earning && <span className="nn-num" style={{ fontSize: 12, color: 'var(--success)' }}>{earning}</span>}

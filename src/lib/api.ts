@@ -20,6 +20,7 @@ export const api = {
   stopTimer: () => call<number>('stop_timer', {}, mockEngine.stopTimer),
   pauseTimer: () => call<void>('pause_timer', {}, mockEngine.pauseTimer),
   resumeTimer: () => call<void>('resume_timer', {}, mockEngine.resumeTimer),
+  dismissLost: () => call<void>('dismiss_lost', {}, mockEngine.dismissLost),
   setTarget: (secs: number) => call<void>('set_target', { secs }, () => mockEngine.setTarget(secs)),
   setDayTarget: (day: number, secs: number | null) =>
     call<void>('set_day_target', { day, secs }, () => mockEngine.setDayTarget(day, secs)),

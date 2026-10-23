@@ -2,7 +2,7 @@
 // runs under `npm run dev`. A loose approximation of src-tauri/src/economy.rs:
 // it never runs inside Tauri, so it only needs to look right.
 
-import { finishAt } from './economy'
+import { REDLINE_SECS, finishAt } from './economy'
 import { DAYS } from './format'
 import type { AppSlice, Day, FocusEvent, FocusTick, Insights, RangeKey, SeriesPoint, Settings } from '../types'
 
@@ -43,7 +43,7 @@ function mockWeek(): Day[] {
 
 let tick: FocusTick = (() => {
   const week = mockWeek()
-  return { state: 'timer', app: 'Cursor', appClass: 'work', away: false, left: 1100, len: 2700, run: 1600, pending: 12, paused: false, pauseLeft: PAUSE_SECS, weekday: todayIdx(), week, bank: bankOf(week), extension: false }
+  return { state: 'timer', app: 'Cursor', appClass: 'work', away: false, left: 1100, len: 2700, run: 1600, pending: 12, paused: false, pauseLeft: PAUSE_SECS, redline: 0, lost: null, weekday: todayIdx(), week, bank: bankOf(week), extension: false }
 })()
 
 function bankOf(week: Day[]) {
@@ -66,8 +66,14 @@ function editToday(fn: (d: Day) => Day): Day[] {
 function advance() {
   if (tick.state !== 'timer') return
   if (tick.paused) {
-    const pauseLeft = tick.pauseLeft - 1
-    publish(pauseLeft > 0 ? { ...tick, pauseLeft } : { ...tick, state: 'idle', left: 0, len: 0, run: 0, pending: 0, paused: false, pauseLeft: 0 })
+    if (tick.pauseLeft > 0) {
+      publish({ ...tick, pauseLeft: tick.pauseLeft - 1 })
+      return
+    }
+    if (!tick.redline) eventListeners.forEach((cb) => cb({ kind: 'redline' }))
+    const redline = (tick.redline || REDLINE_SECS) - 1
+    const lost = { len: tick.len, earned: tick.run / mockSettings.ratio, forfeited: tick.pending, focused: tick.run }
+    publish(redline > 0 ? { ...tick, redline } : { ...tick, state: 'idle', left: 0, len: 0, run: 0, pending: 0, paused: false, pauseLeft: 0, redline: 0, lost })
     return
   }
   const s = mockSettings, run = tick.run + 1
@@ -100,18 +106,21 @@ export const mockEngine = {
     return () => { eventListeners.delete(cb) }
   },
   startTimer(minutes: number) {
-    publish({ ...tick, state: 'timer', left: minutes * 60, len: minutes * 60, run: 0, pending: 0, paused: false, pauseLeft: PAUSE_SECS })
+    publish({ ...tick, state: 'timer', left: minutes * 60, len: minutes * 60, run: 0, pending: 0, paused: false, pauseLeft: PAUSE_SECS, redline: 0, lost: null })
   },
   stopTimer(): number {
     const forfeited = tick.pending
-    publish({ ...tick, state: 'idle', left: 0, len: 0, run: 0, pending: 0, paused: false, pauseLeft: 0 })
+    publish({ ...tick, state: 'idle', left: 0, len: 0, run: 0, pending: 0, paused: false, pauseLeft: 0, redline: 0 })
     return forfeited
   },
   pauseTimer() {
     if (tick.state === 'timer') publish({ ...tick, paused: true })
   },
   resumeTimer() {
-    publish({ ...tick, paused: false })
+    publish({ ...tick, paused: false, redline: 0 })
+  },
+  dismissLost() {
+    publish({ ...tick, lost: null })
   },
   setTarget(secs: number) {
     const bonus = mockSettings.targetBonusMin * 60

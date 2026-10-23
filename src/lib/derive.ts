@@ -32,12 +32,15 @@ export function useFocusView() {
   const hp = wanted > 0 ? tick.bank / wanted : tick.bank > 0 ? 1 : 0
   const phase = todayPace(today.focus, target)
   const inTimer = tick.state === 'timer'
+  // A lost timer is shown only while nothing else is happening; resting covers it.
+  const lost = tick.state === 'idle' ? tick.lost : null
   const calm = tick.state !== 'timer'
 
   const { satMul, ltAdd } = lifeTint(Math.max(0, Math.min(300, 40 + hp * 120)), 100, 300)
   // The sky shows what is happening right now; a low bank already shows in the
   // creature's mood and clay, so it must not wash out the state tint.
-  const sky: Sky = tick.away || tick.paused ? 'idle'
+  const sky: Sky = tick.redline || lost ? 'danger'
+    : tick.away || tick.paused ? 'idle'
     : tick.state === 'timer' ? (tick.appClass === 'work' ? 'good' : 'focus')
     : tick.state === 'drift' ? (hp < 0.15 ? 'danger' : 'worried')
     : 'idle'
@@ -48,7 +51,7 @@ export function useFocusView() {
 
   return {
     ...tick, theme, dark, today, target, hp, hpTone: hpTone(hp), wanted, phase,
-    mood: phase.mood as Mood, sky, inTimer,
+    mood: phase.mood as Mood, sky, inTimer, lost,
     clay: hueClay(phase.hue, satMul * (calm ? 0.55 : phase.sat), ltAdd),
     glow: !calm && !!phase.glow,
     targetPct: target ? today.focus / target : 0,
@@ -62,9 +65,11 @@ export type FocusView = ReturnType<typeof useFocusView>
 
 // One-line status for the sidebar chip and the companion.
 export function statusLine(f: FocusView): { tone: string; text: string; pulse: boolean } {
+  if (f.redline) return { tone: 'var(--critical)', text: `Redline · ${fmtCountdown(f.redline)}`, pulse: true }
   if (f.paused) return { tone: 'var(--faint)', text: `Paused · ${fmtCountdown(f.pauseLeft)}`, pulse: false }
-  if (f.away) return { tone: 'var(--faint)', text: f.inTimer ? `Away · ${fmtCountdown(f.left)}` : 'Away', pulse: false }
+  if (f.away) return { tone: 'var(--faint)', text: f.inTimer ? `Away · ${fmtCountdown(f.pauseLeft)}` : 'Away', pulse: false }
   if (f.state === 'timer') return { tone: f.appClass === 'work' ? 'var(--success)' : hueSwatch(f.phase.hue, f.dark), text: `Focusing · ${fmtCountdown(f.left)}`, pulse: true }
   if (f.state === 'drift') return { tone: f.hp < 0.15 ? 'var(--critical)' : 'var(--warning)', text: `Resting · ${f.app}`, pulse: true }
+  if (f.lost) return { tone: 'var(--critical)', text: 'Focus lost', pulse: false }
   return { tone: 'var(--faint)', text: 'Idle', pulse: false }
 }
