@@ -47,6 +47,7 @@ export type Settings = {
   apps: Record<string, AppClass>
   sites: Site[]
   blockSites: boolean
+  awayDetection: boolean
   ratio: number
   targetBonusMin: number
   presets: number[]

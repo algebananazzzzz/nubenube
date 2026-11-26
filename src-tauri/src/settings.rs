@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::economy::Rules;
 
+/// Idle this long and you're away: nothing is earned or spent, and a running
+/// timer breaks.
+const IDLE_SECS: u64 = 120;
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Site {
@@ -23,6 +27,9 @@ pub struct Settings {
     pub sites: Vec<Site>,
     /// Rest sites won't load in the browser extension while a timer runs.
     pub block_sites: bool,
+    /// Off for work away from the keyboard (paper, reading): idle time then
+    /// counts as the foreground app instead of Away.
+    pub away_detection: bool,
     /// Minutes of focus that earn one minute of rest.
     pub ratio: f64,
     pub target_bonus_min: f64,
@@ -54,6 +61,7 @@ impl Default for Settings {
             .flat_map(|(class, domains)| domains.iter().map(move |d| Site { domain: (*d).into(), class: class.into() }))
             .collect(),
             block_sites: true,
+            away_detection: true,
             ratio: 5.0,
             target_bonus_min: 30.0,
             presets: vec![25, 45, 60, 90],
@@ -72,6 +80,10 @@ impl Settings {
             target_bonus_secs: self.target_bonus_min.max(0.0) * 60.0,
             finish_every_min: self.finish_every.max(1.0),
         }
+    }
+
+    pub fn is_away(&self, idle_secs: u64) -> bool {
+        self.away_detection && idle_secs >= IDLE_SECS
     }
 
     /// The class of `app_name` by exact, case-insensitive name. Never substring:
@@ -185,6 +197,21 @@ mod tests {
         assert!(!blocked.contains(&"github.com".to_string()));
         s.block_sites = false;
         assert!(s.blocked_sites().is_empty());
+    }
+
+    #[test]
+    fn idle_is_away_only_while_away_detection_is_on() {
+        let mut s = Settings::default();
+        assert!(!s.is_away(IDLE_SECS - 1));
+        assert!(s.is_away(IDLE_SECS));
+        s.away_detection = false;
+        assert!(!s.is_away(IDLE_SECS * 100));
+    }
+
+    #[test]
+    fn away_detection_defaults_on_for_older_settings_files() {
+        let s: Settings = serde_json::from_str(r#"{"ratio":4}"#).unwrap();
+        assert!(s.away_detection);
     }
 
     #[test]

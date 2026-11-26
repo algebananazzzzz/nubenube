@@ -85,8 +85,9 @@ Do NOT rely on `npm run lint`; the lint config is pre-broken and not a signal.
   foreground ends a running timer (bonus forfeited).
 - `engine.rs`: `Engine` behind `Arc<Mutex<>>`: 1 s tick (watcher → economy →
   DB → `focus-tick` + `focus-event`), timer/target/plan commands, running timer
-  persisted in `meta` so it survives restarts. Idle ≥ 120 s = Away, which
-  breaks a running timer like a pause.
+  persisted in `meta` so it survives restarts. Idle ≥ 120 s = Away
+  (unless `awayDetection` is off, toggled on Home), which breaks a running
+  timer like a pause.
 - `db.rs`: `focus.db` (the pre-redesign `nube.db` is ignored): `days`,
   15-minute `slots`, `app_time`, `known_apps`, `meta`; `insights()` buckets.
 - `settings.rs`: `settings.json`; apps map name → `work|neutral|rest`

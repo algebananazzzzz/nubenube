@@ -19,9 +19,6 @@ use crate::economy::{self, Day, Event, Foreground, Lost, Timer, REDLINE_SECS};
 use crate::settings::{self, Settings};
 use crate::{browser, db, notify, watcher};
 
-/// Idle this long and you're away: nothing is earned or spent, and a running
-/// timer breaks.
-const IDLE_SECS: u64 = 120;
 /// Cap on one tick's elapsed time so a suspend/resume gap isn't booked as focus.
 const MAX_TICK_DT: f64 = 5.0;
 /// Ticks of no focused app shown as the previous app. Switching windows passes
@@ -195,7 +192,7 @@ impl Engine {
         let s = self.settings();
         let rules = s.rules();
         let blocked = s.blocked_sites();
-        let away = snap.idle_secs >= IDLE_SECS;
+        let away = s.is_away(snap.idle_secs);
         // An unlisted site takes the browser's own class.
         let class = site.as_deref().and_then(|d| s.site_class(d)).unwrap_or_else(|| s.class_of(&snap.app_name));
         let fg = if away {

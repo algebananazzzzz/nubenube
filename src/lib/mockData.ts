@@ -18,6 +18,7 @@ export const mockSettings: Settings = {
     { domain: 'mail.google.com', class: 'neutral' },
   ],
   blockSites: true,
+  awayDetection: true,
   ratio: 5, targetBonusMin: 30, presets: [25, 45, 60, 90], finishEvery: 15,
   restDays: [5, 6],
 }

@@ -8,9 +8,10 @@ import { useFocusView, useRules, type FocusView } from '../lib/derive'
 import { FINISH, LEN_MAX, LEN_MIN, LEN_STEP, WARMTH, clampLen, projectBonus } from '../lib/economy'
 import { DAYS, fmtCountdown, fmtHM } from '../lib/format'
 import type { Lost } from '../types'
+import { useSettings } from '../store/settings'
 import { say } from '../store/toast'
 import { Sky, Nube } from '../components/NubeCreature'
-import { Bar, Btn, Card, Dot, Eyebrow, Pill, Ring, Section, Tile } from '../components/ui'
+import { Bar, Btn, Card, Dot, Eyebrow, Pill, Ring, Section, Tile, Toggle } from '../components/ui'
 
 const report = (e: unknown) => say(String(e))
 const startTimer = (min: number) => api.startTimer(min).catch(report)
@@ -101,6 +102,7 @@ function LostSummary({ lost }: { lost: Lost }) {
 
 function Hero() {
   const f = useFocusView(), s = useRules()
+  const save = useSettings((st) => st.save)
   const cue = heroCopy(f)
   const big = f.redline ? fmtCountdown(f.redline) : f.inTimer ? fmtCountdown(f.left) : '−1×'
   const bigTone = f.redline ? 'var(--critical)' : f.inTimer ? 'var(--ink)' : 'var(--warning)'
@@ -129,6 +131,11 @@ function Hero() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Dot tone={cue.tone} pulse={cue.pulse} size={9} />
           <span className="nn-disp" style={{ fontSize: 20, color: 'var(--ink)', lineHeight: 1.2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cue.title}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, fontSize: 12, color: 'var(--faint)' }}>
+            Away detection
+            <Toggle on={s.awayDetection} onChange={(v) => void save({ awayDetection: v })} />
+          </span>
         </div>
         <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.5, marginTop: 8, textWrap: 'pretty' }}>{cue.line}</div>
         <div style={{ flex: 1, minHeight: 16 }} />
